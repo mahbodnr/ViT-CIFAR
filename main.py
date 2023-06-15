@@ -13,10 +13,10 @@ from utils import get_model, get_dataset, get_experiment_name, get_criterion
 from da import CutMix, MixUp
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--api-key", help="API Key for Comet.ml")
 parser.add_argument(
-    "--api-key", help="API Key for Comet.ml", default="g89eOAX55sG7roxjbRNwzHPiL"
+    "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
-parser.add_argument("--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"])
 parser.add_argument("--model-name", default="vit", help="[vit]", type=str)
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
@@ -195,7 +195,6 @@ if __name__ == "__main__":
         max_epochs=args.max_epochs,
         weights_summary="full",
         progress_bar_refresh_rate=refresh_rate,
-        val_check_interval=0.01,
     )
     trainer.fit(model=net, train_dataloader=train_dl, val_dataloaders=test_dl)
     if not args.dry_run:
