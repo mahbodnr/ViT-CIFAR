@@ -37,6 +37,8 @@ def get_model(args):
         net = AttentionFreeViT(
             mode='full',
             seq_len=args.patch**2+1 if args.is_cls_token else args.patch**2,
+            factorize=args.factorize,
+            factorization_dimension=args.factorization_dimension,
             in_c=args.in_c,
             num_classes=args.num_classes,
             img_size=args.size,
@@ -137,7 +139,7 @@ def get_experiment_name(args):
         experiment_name+="_cm"
     if args.mixup:
         experiment_name+="_mu"
-    if args.off_cls_token:
+    if not args.is_cls_token:
         experiment_name+="_gap"
     print(f"Experiment:{experiment_name}")
     return experiment_name

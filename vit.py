@@ -75,6 +75,8 @@ class AttentionFreeViT(ViT):
         self,
         mode,
         seq_len: int,
+        factorize: bool = False,
+        factorization_dimension: int = 128,
         in_c: int = 3,
         num_classes: int = 10,
         img_size: int = 224,
@@ -107,6 +109,8 @@ class AttentionFreeViT(ViT):
                     mlp_hidden=mlp_hidden,
                     dropout=dropout,
                     head=head,
+                    factorize=factorize,
+                    factorization_dimension=factorization_dimension,
                 )
                 for _ in range(num_layers)
             ]
