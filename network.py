@@ -100,9 +100,9 @@ class Net(pl.LightningModule):
                             metadata= {"layer": name.split(".")[0]}
                         )
                     # Plot w
-                    if hasattr(param, "w"):
+                    if name.endswith("attention.w"):
                         self.logger.experiment.log_confusion_matrix(
-                            matrix= param.w.detach().cpu().numpy(),
+                            matrix= param.detach().cpu().numpy(),
                             title=name, 
                             row_label="Tokens",
                             column_label="Tokens", 
