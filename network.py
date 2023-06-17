@@ -85,13 +85,13 @@ class Net(pl.LightningModule):
                     param.detach().cpu().numpy(),
                     name=name,
                     step=self.current_epoch,
-                    context=self.logger.name,
+                    metadata=self.logger.name,
                 )
                 self.logger.experiment.log_histogram_3d(
                     param.grad.detach().cpu().numpy(),
                     name=name + "_grad",
                     step=self.current_epoch,
-                    context=self.logger.name,
+                    metadata=self.logger.name,
                 )
 
     def validation_step(self, batch, batch_idx):
