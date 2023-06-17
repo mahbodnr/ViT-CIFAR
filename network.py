@@ -74,7 +74,7 @@ class Net(pl.LightningModule):
         self.log("acc", acc)
         return loss
 
-    def on_train_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
         self.log(
             "lr", self.optimizer.param_groups[0]["lr"], on_epoch=self.current_epoch
         )
@@ -95,6 +95,7 @@ class Net(pl.LightningModule):
                     step=self.current_epoch,
                     metadata=self.logger.name,
                 )
+        self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
         img, label = batch
