@@ -81,20 +81,19 @@ class Net(pl.LightningModule):
         # log weights and gradients
         if not self.hparams.dry_run:
             for name, param in self.model.named_parameters():
-                if param.grad is None:
-                    print(f"[WARN] {name} has no grad")
                 self.logger.experiment.log_histogram_3d(
                     param.detach().cpu().numpy(),
                     name=name,
                     step=self.current_epoch,
                     metadata=self.logger.name,
                 )
-                self.logger.experiment.log_histogram_3d(
-                    param.grad.detach().cpu().numpy(),
-                    name=name + "_grad",
-                    step=self.current_epoch,
-                    metadata=self.logger.name,
-                )
+                if param.grad is not None: # cls_token has no grad
+                    self.logger.experiment.log_histogram_3d(
+                        param.grad.detach().cpu().numpy(),
+                        name=name + "_grad",
+                        step=self.current_epoch,
+                        metadata=self.logger.name,
+                    )
         self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
