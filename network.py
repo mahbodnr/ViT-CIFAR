@@ -74,13 +74,15 @@ class Net(pl.LightningModule):
         self.log("acc", acc)
         return loss
 
-    def training_epoch_end(self, outputs):
+    def on_train_epoch_end(self, outputs):
         self.log(
             "lr", self.optimizer.param_groups[0]["lr"], on_epoch=self.current_epoch
         )
         # log weights and gradients
         if not self.hparams.dry_run:
             for name, param in self.model.named_parameters():
+                if param.grad is None:
+                    print(f"[WARN] {name} has no grad")
                 self.logger.experiment.log_histogram_3d(
                     param.detach().cpu().numpy(),
                     name=name,

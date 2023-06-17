@@ -100,14 +100,13 @@ if __name__ == "__main__":
     trainer = pl.Trainer(
         precision=args.precision,
         fast_dev_run=args.dry_run,
-        gpus=args.gpus,
+        accelerator="auto",
+        devices=args.gpus if args.gpus else "auto",
         benchmark=args.benchmark,
         logger=logger,
         max_epochs=args.max_epochs,
-        weights_summary="full",
-        progress_bar_refresh_rate=refresh_rate,
     )
-    trainer.fit(model=net, train_dataloader=train_dl, val_dataloaders=test_dl)
+    trainer.fit(model=net, train_dataloaders=train_dl, val_dataloaders=test_dl)
     if not args.dry_run:
         model_path = f"weights/{experiment_name}.pth"
         torch.save(net.state_dict(), model_path)
