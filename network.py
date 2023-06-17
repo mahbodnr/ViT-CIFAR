@@ -111,7 +111,7 @@ class Net(pl.LightningModule):
                             epoch=self.current_epoch,
                         )                        
         except Exception as e:
-            print(f"[INFO] Failed to log weights and gradients. {e}")
+            print(f"\n[INFO] Failed to log weights and gradients. {e}")
 
     def validation_step(self, batch, batch_idx):
         img, label = batch
