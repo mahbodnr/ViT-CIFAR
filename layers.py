@@ -95,16 +95,19 @@ class AFTFull(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        B, T, _ = x.shape  # (#Batches, #Inputs, #Features)
+        # x shape: (#Batches, #Inputs, #Features)
         Q = self.Wq(x)
         K = self.Wk(x)
         V = self.Wv(x)
         Q_sig = torch.sigmoid(Q)
         if self.factorize:
-            exp_w = torch.exp(self.u @ self.v)
+            w = self.u @ self.v
         else:
-            exp_w = torch.exp(self.w)
-        weighted = exp_w @ torch.mul(torch.exp(K), V) / (exp_w @ torch.exp(K))
+            w = self.w
+        # reduce the max value along arbitrary axis for stability reasons. The value will be cancelled out.
+        exp_w = torch.exp(w - torch.max(w, dim=-1, keepdim=True)[0])
+        exp_K = torch.exp(K - torch.max(K, dim=-1, keepdim=True)[0])
+        weighted = (exp_w @ torch.mul(exp_K, V)) / (exp_w @ exp_K)
         Yt = torch.mul(Q_sig, weighted)
         output = self.dropout(self.out_project(Yt))
         return output
