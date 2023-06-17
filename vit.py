@@ -33,12 +33,14 @@ class ViT(nn.Module):
             nn.Parameter(torch.randn(1, 1, hidden)) if is_cls_token else None
         )
         self.pos_emb = nn.Parameter(torch.randn(1, num_tokens, hidden))
-        self.enc = nn.Sequential(*[
-            TransformerEncoder(
-                features=hidden, mlp_hidden=mlp_hidden, dropout=dropout, head=head
-            )
-            for _ in range(num_layers)
-        ])
+        self.enc = nn.Sequential(
+            *[
+                TransformerEncoder(
+                    features=hidden, mlp_hidden=mlp_hidden, dropout=dropout, head=head
+                )
+                for _ in range(num_layers)
+            ]
+        )
         self.fc = nn.Sequential(
             nn.LayerNorm(hidden), nn.Linear(hidden, num_classes)  # for cls_token
         )
@@ -145,7 +147,7 @@ if __name__ == "__main__":
     )
     AFViT = AttentionFreeViT(
         mode="full",
-        seq_len=16*16,
+        seq_len=16 * 16,
         in_c=c,
         num_classes=10,
         img_size=h,

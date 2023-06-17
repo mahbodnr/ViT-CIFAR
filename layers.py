@@ -113,6 +113,45 @@ class AFTFull(nn.Module):
         return output
 
 
+class AFTSimple(nn.Module):
+    def __init__(
+        self,
+        features: int,
+        head: int = 1,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        """
+        max_seqlen: the maximum number of timesteps (sequence length) to be fed in
+        features: the embedding dimension of the tokens
+        hidden_dim: the hidden dimension used inside AFT Full
+
+        Number of heads is 1 as done in the paper
+        w ∈ R^{T×T} is the learned pair-wise position biases
+        we assume the query, key and value are the same dimension within each head,
+        and the output dimension matches that of the input.
+        """
+        if head > 1:
+            raise NotImplementedError
+        self.features = features
+        self.Wq = nn.Linear(features, features)
+        self.Wk = nn.Linear(features, features)
+        self.Wv = nn.Linear(features, features)
+
+        self.out_project = nn.Linear(features, features)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # x shape: (#Batches, #Inputs, #Features)
+        Q = self.Wq(x)
+        K = self.Wk(x)
+        V = self.Wv(x)
+        weighted = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
+        Yt = torch.mul(torch.sigmoid(Q), weighted)
+        output = self.dropout(self.out_project(Yt))
+        return output
+
+
 class AttentionFreeTransformerEncoder(TransformerEncoder):
     def __init__(
         self,
@@ -137,6 +176,8 @@ class AttentionFreeTransformerEncoder(TransformerEncoder):
                 head=head,
                 dropout=dropout,
             )
+        elif mode == "simple":
+            self.attention = AFTSimple(features, head=head, dropout=dropout)
         elif mode == "local":
             raise NotImplementedError
         elif mode == "conv":

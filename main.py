@@ -12,7 +12,9 @@ parser.add_argument("--comet-api-key", help="API Key for Comet.ml")
 parser.add_argument(
     "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
-parser.add_argument("--model-name", default="vit", type=str, choices=["vit", "aftfull"])
+parser.add_argument(
+    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple"]
+)
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
 parser.add_argument("--eval-batch-size", default=1024, type=int)
@@ -41,7 +43,12 @@ parser.add_argument("--mlp-hidden", default=384 * 4, type=int)
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--factorization-dimension", default=32, type=int)
 parser.add_argument("--off-cls-token", action="store_false", dest="is_cls_token")
-parser.add_argument("--matmul_precision", default="medium", type=str, choices=["medium", "high", "highest"])
+parser.add_argument(
+    "--matmul-precision",
+    default="medium",
+    type=str,
+    choices=["medium", "high", "highest"],
+)
 parser.add_argument("--seed", default=42, type=int)
 parser.add_argument("--project-name", default="VisionTransformer")
 args = parser.parse_args()
@@ -79,7 +86,6 @@ test_dl = torch.utils.data.DataLoader(
     num_workers=args.num_workers,
     pin_memory=True,
 )
-
 
 
 if __name__ == "__main__":
