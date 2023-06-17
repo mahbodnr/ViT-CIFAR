@@ -76,7 +76,7 @@ class Net(pl.LightningModule):
 
     def on_train_epoch_end(self):
         self.log(
-            "lr", self.optimizer.param_groups[0]["lr"], on_epoch=self.current_epoch
+            "lr", self.optimizer.param_groups[0]["lr"], on_epoch=True,
         )
         # log weights and gradients
         if not self.hparams.dry_run:
