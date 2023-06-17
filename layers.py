@@ -100,12 +100,12 @@ class AFTFull(nn.Module):
         K = self.Wk(x)
         V = self.Wv(x)
         if self.factorize:
-            w = self.u @ self.v
+            w = (self.u @ self.v).unsqueeze(0)
         else:
-            w = self.w
+            w = self.w.unsqueeze(0)
         # reduce the max value along arbitrary axis for stability reasons. The value will be cancelled out.
-        exp_w = torch.exp(w - torch.max(w, dim=-1, keepdim=True)[0])
-        exp_K = torch.exp(K - torch.max(K, dim=-1, keepdim=True)[0])
+        exp_w = torch.exp(w) # - torch.max(w, dim=-1, keepdim=True)[0]
+        exp_K = torch.exp(K) # - torch.max(K, dim=0, keepdim=True)[0]
         weighted = (exp_w @ torch.mul(exp_K, V)) / (exp_w @ exp_K)
         # weighted = torch.einsum("tt, btf->btf", exp_w, exp_K * V) / torch.einsum("tt, btf->btf", exp_w, exp_K)
         Yt = torch.mul(torch.sigmoid(Q), weighted)
