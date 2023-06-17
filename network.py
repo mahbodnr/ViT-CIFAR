@@ -85,16 +85,15 @@ class Net(pl.LightningModule):
                     param.detach().cpu().numpy(),
                     name=name,
                     step=self.current_epoch,
-                    metadata=self.logger.name,
+                    metadata= {"layer": name.split(".")[0]}
                 )
                 if param.grad is not None: # cls_token has no grad
                     self.logger.experiment.log_histogram_3d(
                         param.grad.detach().cpu().numpy(),
                         name=name + "_grad",
                         step=self.current_epoch,
-                        metadata=self.logger.name,
+                        metadata= {"layer": name.split(".")[0]}
                     )
-        self.training_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
         img, label = batch
