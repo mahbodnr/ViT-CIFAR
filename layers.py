@@ -107,7 +107,8 @@ class AFTFull(nn.Module):
         # reduce the max value along arbitrary axis for stability reasons. The value will be cancelled out.
         exp_w = torch.exp(w - torch.max(w, dim=-1, keepdim=True)[0])
         exp_K = torch.exp(K - torch.max(K, dim=-1, keepdim=True)[0])
-        weighted = (exp_w @ torch.mul(exp_K, V)) / (exp_w @ exp_K)
+        # weighted = (exp_w @ torch.mul(exp_K, V)) / (exp_w @ exp_K)
+        weighted = torch.einsum("tt, btf->btf", exp_w, exp_K * V) / torch.einsum("tt, btf->btf", exp_w, exp_K)
         Yt = torch.mul(Q_sig, weighted)
         output = self.dropout(self.out_project(Yt))
         return output

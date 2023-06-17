@@ -78,22 +78,40 @@ class Net(pl.LightningModule):
         self.log(
             "lr", self.optimizer.param_groups[0]["lr"], on_epoch=True,
         )
+        # check if there is any nan value in model parameters
+        for name, param in self.model.named_parameters():
+            if torch.isnan(param).any():
+                raise ValueError(f"[ERROR] {name} has nan value. Training stopped.")
         # log weights and gradients
-        if not self.hparams.dry_run:
-            for name, param in self.model.named_parameters():
-                self.logger.experiment.log_histogram_3d(
-                    param.detach().cpu().numpy(),
-                    name=name,
-                    step=self.current_epoch,
-                    metadata= {"layer": name.split(".")[0]}
-                )
-                if param.grad is not None: # cls_token has no grad
+        try:
+            if not self.hparams.dry_run:
+                for name, param in self.model.named_parameters():
                     self.logger.experiment.log_histogram_3d(
-                        param.grad.detach().cpu().numpy(),
-                        name=name + "_grad",
+                        param.detach().cpu().numpy(),
+                        name=name,
                         step=self.current_epoch,
                         metadata= {"layer": name.split(".")[0]}
                     )
+                    if param.grad is not None: # cls_token has no grad
+                        self.logger.experiment.log_histogram_3d(
+                            param.grad.detach().cpu().numpy(),
+                            name=name + "_grad",
+                            step=self.current_epoch,
+                            metadata= {"layer": name.split(".")[0]}
+                        )
+                    # Plot w
+                    if hasattr(param, "w"):
+                        self.logger.experiment.log_confusion_matrix(
+                            matrix= param.w.detach().cpu().numpy(),
+                            title=name, 
+                            row_label="Tokens",
+                            column_label="Tokens", 
+                            file_name=f"{name}.json", 
+                            step=self.current_epoch,
+                            epoch=self.current_epoch,
+                        )                        
+        except Exception as e:
+            print(f"[INFO] Failed to log weights and gradients. {e}")
 
     def validation_step(self, batch, batch_idx):
         img, label = batch
