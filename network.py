@@ -78,6 +78,21 @@ class Net(pl.LightningModule):
         self.log(
             "lr", self.optimizer.param_groups[0]["lr"], on_epoch=self.current_epoch
         )
+        # log weights and gradients
+        if not self.hparams.dry_run:
+            for name, param in self.model.named_parameters():
+                self.logger.experiment.log_histogram_3d(
+                    param.detach().cpu().numpy(),
+                    name=name,
+                    step=self.current_epoch,
+                    context=self.logger.name,
+                )
+                self.logger.experiment.log_histogram_3d(
+                    param.grad.detach().cpu().numpy(),
+                    name=name + "_grad",
+                    step=self.current_epoch,
+                    context=self.logger.name,
+                )
 
     def validation_step(self, batch, batch_idx):
         img, label = batch
