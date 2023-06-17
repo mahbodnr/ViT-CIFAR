@@ -13,7 +13,7 @@ parser.add_argument(
     "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
 parser.add_argument(
-    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple"]
+    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple", "hamburger"]
 )
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
@@ -41,6 +41,7 @@ parser.add_argument("--num-layers", default=7, type=int)
 parser.add_argument("--hidden", default=384, type=int)
 parser.add_argument("--mlp-hidden", default=384 * 4, type=int)
 parser.add_argument("--factorize", action="store_true")
+parser.add_argument("--burger-mode", default="V1", type=str, choices=["V1", "V2", "V2+"])
 parser.add_argument("--factorization-dimension", default=32, type=int)
 parser.add_argument("--off-cls-token", action="store_false", dest="is_cls_token")
 parser.add_argument(

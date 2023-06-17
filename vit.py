@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torchsummary
 
-from layers import TransformerEncoder, AttentionFreeTransformerEncoder
+from layers import TransformerEncoder, AttentionFreeTransformerEncoder, HamburgerTransformerEncoder
 
 
 class ViT(nn.Module):
@@ -118,6 +118,46 @@ class AttentionFreeViT(ViT):
             ]
         )
 
+class HamburgerViT(ViT):
+    def __init__(
+        self,
+        burger_mode,
+        seq_len: int,
+        in_c: int = 3,
+        num_classes: int = 10,
+        img_size: int = 224,
+        patch: int = 16,
+        dropout: float = 0.0,
+        num_layers: int = 12,
+        hidden: int = 768,
+        mlp_hidden: int = 768 * 4,
+        head: int = 1,
+        is_cls_token: bool = True,
+    ):
+        super(HamburgerViT, self).__init__(
+            in_c,
+            num_classes,
+            img_size,
+            patch,
+            dropout,
+            num_layers,
+            hidden,
+            mlp_hidden,
+            head,
+            is_cls_token,
+        )
+        self.enc = nn.Sequential(
+            *[
+                HamburgerTransformerEncoder(
+                    burger= burger_mode,
+                    features= hidden,
+                    seq_len= seq_len,
+                    mlp_hidden= mlp_hidden,
+                    dropout= dropout,
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
 if __name__ == "__main__":
     from torchview import draw_graph

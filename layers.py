@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from hamburger import get_hamburger
 
 class TransformerEncoder(nn.Module):
     def __init__(
@@ -151,7 +152,6 @@ class AFTSimple(nn.Module):
         output = self.dropout(self.out_project(Yt))
         return output
 
-
 class AttentionFreeTransformerEncoder(TransformerEncoder):
     def __init__(
         self,
@@ -185,6 +185,63 @@ class AttentionFreeTransformerEncoder(TransformerEncoder):
         else:
             raise ValueError(f"mode must be one of 'full', 'local', 'conv'. Got {mode}")
 
+class HamburgerAttention(nn.Module):
+    def __init__(
+        self,
+        burger: str,
+        features: int,
+        seq_len: int, #TODO: remove this
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        """
+        max_seqlen: the maximum number of timesteps (sequence length) to be fed in
+        features: the embedding dimension of the tokens
+        hidden_dim: the hidden dimension used inside AFT Full
+        """
+        hamburger_args= {
+            "HAM_TYPE": "NMF",
+            'MD_D': 512,
+        }
+        self.hamburger = get_hamburger(burger)(in_c= 1, args= hamburger_args)
+        self.features = features
+        self.Wq = nn.Linear(features, features)
+        self.Wk = nn.Linear(features, features)
+        self.Wv = nn.Linear(features, features)
+
+        self.out_project = nn.Linear(features, features)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # x shape: (#Batches, #Inputs, #Features)
+        K = self.Wk(x)
+        Q = self.Wq(x)
+        V = self.Wv(x)
+        K = self.hamburger(K.unsqueeze(1)).squeeze(1)
+        weighted = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
+        Yt = torch.mul(torch.sigmoid(Q), weighted)
+        output = self.dropout(self.out_project(Yt))
+        return output
+    
+
+class HamburgerTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        burger: str,
+        features: int,
+        seq_len: int,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+    ):
+        super(HamburgerTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout
+        )
+        self.attention = HamburgerAttention(
+            burger,
+            features,
+            seq_len,
+            dropout=dropout,
+        )
 
 if __name__ == "__main__":
     from torchview import draw_graph
