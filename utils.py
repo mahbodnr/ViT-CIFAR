@@ -59,6 +59,7 @@ def get_model(args):
             mlp_hidden=args.mlp_hidden,
             head=args.head,
             is_cls_token=args.is_cls_token,
+            query= args.query,
         )
     elif args.model_name == "hamburger_attention":
         from vit import HamburgerAttentionViT
@@ -75,6 +76,7 @@ def get_model(args):
             mlp_hidden=args.mlp_hidden,
             head=args.head,
             is_cls_token=args.is_cls_token,
+            query= args.query,
         )
     elif args.model_name == "hamburger":
         from vit import HamburgerViT
@@ -183,6 +185,8 @@ def get_dataset(args):
 
 def get_experiment_name(args):
     experiment_name = f"{args.model_name}_{args.dataset}"
+    if not args.query:
+        experiment_name += "_nq"
     if args.autoaugment:
         experiment_name += "_aa"
     if args.label_smoothing:
@@ -195,5 +199,4 @@ def get_experiment_name(args):
         experiment_name += "_mu"
     if not args.is_cls_token:
         experiment_name += "_gap"
-    print(f"Experiment:{experiment_name}")
     return experiment_name

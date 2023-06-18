@@ -64,6 +64,7 @@ class AFTFull(nn.Module):
         factorization_dimension: int = 128,
         head: int = 1,
         dropout: float = 0.0,
+        query: bool = True,
     ):
         super().__init__()
         """
@@ -78,10 +79,12 @@ class AFTFull(nn.Module):
         """
         if head > 1:
             raise NotImplementedError
+        self.query = query
         self.features = features
-        self.Wq = nn.Linear(features, features)
         self.Wk = nn.Linear(features, features)
         self.Wv = nn.Linear(features, features)
+        if query:
+            self.Wq = nn.Linear(features, features)
         self.factorize = factorize
         if factorize:
             self.u = nn.Parameter(torch.Tensor(seq_len, factorization_dimension))
@@ -97,7 +100,6 @@ class AFTFull(nn.Module):
 
     def forward(self, x):
         # x shape: (#Batches, #Inputs, #Features)
-        Q = self.Wq(x)
         K = self.Wk(x)
         V = self.Wv(x)
         if self.factorize:
@@ -107,9 +109,11 @@ class AFTFull(nn.Module):
         # reduce the max value along arbitrary axis for stability reasons. The value will be cancelled out.
         exp_w = torch.exp(w - torch.max(w, dim=-1, keepdim=True)[0])
         exp_K = torch.exp(K - torch.max(K, dim=0, keepdim=True)[0])
-        weighted = (exp_w @ torch.mul(exp_K, V)) / (exp_w @ exp_K)
-        # weighted = torch.einsum("tt, btf->btf", exp_w, exp_K * V) / torch.einsum("tt, btf->btf", exp_w, exp_K)
-        Yt = torch.mul(torch.sigmoid(Q), weighted)
+        Yt = (exp_w @ torch.mul(exp_K, V)) / (exp_w @ exp_K)
+        # Yt = torch.einsum("tt, btf->btf", exp_w, exp_K * V) / torch.einsum("tt, btf->btf", exp_w, exp_K)
+        if self.query:
+            Q = self.Wq(x)
+            Yt = torch.mul(torch.sigmoid(Q), Yt)
         output = self.dropout(self.out_project(Yt))
         return output
 
@@ -120,6 +124,7 @@ class AFTSimple(nn.Module):
         features: int,
         head: int = 1,
         dropout: float = 0.0,
+        query: bool = True,
     ):
         super().__init__()
         """
@@ -134,21 +139,24 @@ class AFTSimple(nn.Module):
         """
         if head > 1:
             raise NotImplementedError
+        self.query = query
         self.features = features
-        self.Wq = nn.Linear(features, features)
         self.Wk = nn.Linear(features, features)
         self.Wv = nn.Linear(features, features)
+        if query:
+            self.Wq = nn.Linear(features, features)
 
         self.out_project = nn.Linear(features, features)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         # x shape: (#Batches, #Inputs, #Features)
-        Q = self.Wq(x)
         K = self.Wk(x)
         V = self.Wv(x)
-        weighted = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
-        Yt = torch.mul(torch.sigmoid(Q), weighted)
+        Yt = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
+        if self.query:
+            Q = self.Wq(x)
+            Yt = torch.mul(torch.sigmoid(Q), Yt)
         output = self.dropout(self.out_project(Yt))
         return output
 
@@ -163,6 +171,7 @@ class AttentionFreeTransformerEncoder(TransformerEncoder):
         factorization_dimension: int = 128,
         head: int = 1,
         dropout: float = 0.0,
+        query: bool = True,
     ):
         super(AttentionFreeTransformerEncoder, self).__init__(
             features, mlp_hidden, head, dropout
@@ -175,6 +184,7 @@ class AttentionFreeTransformerEncoder(TransformerEncoder):
                 factorization_dimension=factorization_dimension,
                 head=head,
                 dropout=dropout,
+                query=query,
             )
         elif mode == "simple":
             self.attention = AFTSimple(features, head=head, dropout=dropout)
@@ -208,8 +218,9 @@ class HamburgerAttention(nn.Module):
         self,
         burger: str,
         features: int,
-        seq_len: int, #TODO: remove this
+        seq_len: int,
         dropout: float = 0.0,
+        query: bool= True,
     ):
         super().__init__()
         """
@@ -217,11 +228,13 @@ class HamburgerAttention(nn.Module):
         features: the embedding dimension of the tokens
         hidden_dim: the hidden dimension used inside AFT Full
         """
+        self.query = query
         self.hamburger = Hamburger(burger, seq_len)
         self.features = features
-        self.Wq = nn.Linear(features, features)
         self.Wk = nn.Linear(features, features)
         self.Wv = nn.Linear(features, features)
+        if query:
+            self.Wq = nn.Linear(features, features)
 
         self.out_project = nn.Linear(features, features)
         self.dropout = nn.Dropout(dropout)
@@ -229,11 +242,12 @@ class HamburgerAttention(nn.Module):
     def forward(self, x):
         # x shape: (#Batches, #Inputs, #Features)
         K = self.Wk(x)
-        Q = self.Wq(x)
         V = self.Wv(x)
         K = self.hamburger(K)
-        weighted = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
-        Yt = torch.mul(torch.sigmoid(Q), weighted)
+        Yt = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
+        if self.query:
+            Q = self.Wq(x)
+            Yt = torch.mul(torch.sigmoid(Q), Yt)
         output = self.dropout(self.out_project(Yt))
         return output
     
@@ -245,6 +259,7 @@ class HamburgerAttentionTransformerEncoder(TransformerEncoder):
         seq_len: int,
         mlp_hidden: int,
         dropout: float = 0.0,
+        query: bool = True,
     ):
         super(HamburgerAttentionTransformerEncoder, self).__init__(
             features, mlp_hidden, 1, dropout
@@ -254,6 +269,7 @@ class HamburgerAttentionTransformerEncoder(TransformerEncoder):
             features,
             seq_len,
             dropout=dropout,
+            query=query,
         )
 
 

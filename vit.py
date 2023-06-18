@@ -93,6 +93,7 @@ class AttentionFreeViT(ViT):
         mlp_hidden: int = 768 * 4,
         head: int = 1,
         is_cls_token: bool = True,
+        query: bool = True,
     ):
         super(AttentionFreeViT, self).__init__(
             in_c,
@@ -117,6 +118,7 @@ class AttentionFreeViT(ViT):
                     head=head,
                     factorize=factorize,
                     factorization_dimension=factorization_dimension,
+                    query=query,
                 )
                 for _ in range(num_layers)
             ]
@@ -137,6 +139,7 @@ class HamburgerAttentionViT(ViT):
         mlp_hidden: int = 768 * 4,
         head: int = 1,
         is_cls_token: bool = True,
+        query: bool = True,
     ):
         super(HamburgerAttentionViT, self).__init__(
             in_c,
@@ -158,6 +161,7 @@ class HamburgerAttentionViT(ViT):
                     seq_len= seq_len,
                     mlp_hidden= mlp_hidden,
                     dropout= dropout,
+                    query= query,
                 )
                 for _ in range(num_layers)
             ]

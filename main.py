@@ -41,6 +41,7 @@ parser.add_argument("--num-layers", default=7, type=int)
 parser.add_argument("--hidden", default=384, type=int)
 parser.add_argument("--mlp-hidden", default=384 * 4, type=int)
 parser.add_argument("--factorize", action="store_true")
+parser.add_argument("--no-query", action="store_false", dest="query")
 parser.add_argument("--burger-mode", default="V1", type=str, choices=["V1", "V2", "V2+"])
 parser.add_argument("--factorization-dimension", default=32, type=int)
 parser.add_argument("--off-cls-token", action="store_false", dest="is_cls_token")
@@ -93,7 +94,7 @@ if __name__ == "__main__":
     experiment_name = get_experiment_name(args)
     args.experiment_name = experiment_name
     args.input_size = train_ds[0][0].shape[-1]
-    print(experiment_name)
+    print(f"Experiment: {experiment_name}")
     if args.comet_api_key:
         print("[INFO] Log with Comet.ml!")
         logger = pl.loggers.CometLogger(
