@@ -231,7 +231,7 @@ class HamburgerAttention(nn.Module):
         self.query = query
         self.hamburger = Hamburger(burger, seq_len)
         self.features = features
-        self.Wk = nn.Linear(features, features)
+        # self.Wk = nn.Linear(features, features)
         self.Wv = nn.Linear(features, features)
         if query:
             self.Wq = nn.Linear(features, features)
@@ -241,9 +241,9 @@ class HamburgerAttention(nn.Module):
 
     def forward(self, x):
         # x shape: (#Batches, #Inputs, #Features)
-        K = self.Wk(x)
+        # K = self.Wk(x)
         V = self.Wv(x)
-        K = self.hamburger(K)
+        K = self.hamburger(x)
         Yt = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
         if self.query:
             Q = self.Wq(x)

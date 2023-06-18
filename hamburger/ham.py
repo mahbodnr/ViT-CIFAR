@@ -15,19 +15,19 @@ class _MatrixDecomposition2DBase(nn.Module):
     def __init__(self, args):
         super().__init__()
 
-        self.spatial = getattr(args, 'SPATIAL', True)
+        self.spatial = getattr(args, "SPATIAL", True)
 
-        self.S = getattr(args, 'MD_S', 1)
-        self.D = getattr(args, 'MD_D', 512)
-        self.R = getattr(args, 'MD_R', 64)
+        self.S = getattr(args, "MD_S", 1)
+        self.D = getattr(args, "MD_D", 512)
+        self.R = getattr(args, "MD_R", 64)
 
-        self.train_steps = getattr(args, 'TRAIN_STEPS', 6)
-        self.eval_steps  = getattr(args, 'EVAL_STEPS', 7)
+        self.train_steps = getattr(args, "TRAIN_STEPS", 6)
+        self.eval_steps = getattr(args, "EVAL_STEPS", 7)
 
-        self.inv_t = getattr(args, 'INV_T', 100)
-        self.eta   = getattr(args, 'ETA', 0.9)
+        self.inv_t = getattr(args, "INV_T", 100)
+        self.eta = getattr(args, "ETA", 0.9)
 
-        self.rand_init = getattr(args, 'RAND_INIT', True)
+        self.rand_init = getattr(args, "RAND_INIT", True)
 
         # print('spatial', self.spatial)
         # print('S', self.S)
@@ -73,9 +73,9 @@ class _MatrixDecomposition2DBase(nn.Module):
             N = C // self.S
             x = x.view(B * self.S, N, D).transpose(1, 2)
 
-        if not self.rand_init and not hasattr(self, 'bases'):
+        if not self.rand_init and not hasattr(self, "bases"):
             bases = self._build_bases(1, self.S, D, self.R, x.device)
-            self.register_buffer('bases', bases)
+            self.register_buffer("bases", bases)
 
         # (S, D, R) -> (B * S, D, R)
         if self.rand_init:
@@ -122,10 +122,7 @@ class VQ2D(_MatrixDecomposition2DBase):
 
     def _build_bases(self, B, S, D, R, device):
         bases = torch.randn((B * S, D, R)).to(device)
-
-
         bases = F.normalize(bases, dim=1)
-
         return bases
 
     @torch.no_grad()
@@ -174,12 +171,11 @@ class CD2D(_MatrixDecomposition2DBase):
     def __init__(self, args):
         super().__init__(args)
 
-        self.beta = getattr(args, 'BETA', 0.1)
-        print('beta', self.beta)
+        self.beta = getattr(args, "BETA", 0.1)
+        print("beta", self.beta)
 
     def _build_bases(self, B, S, D, R, device):
         bases = torch.randn((B * S, D, R)).to(device)
-
 
         bases = F.normalize(bases, dim=1)
 
@@ -209,8 +205,9 @@ class CD2D(_MatrixDecomposition2DBase):
 
     def compute_coef(self, x, bases, _):
         # [(B * S, R, D) @ (B * S, D, R) + (B * S, R, R)] ^ (-1) -> (B * S, R, R)
-        temp = torch.bmm(bases.transpose(1, 2), bases) \
-            + self.beta * torch.eye(self.R).repeat(x.shape[0], 1, 1).to(device)
+        temp = torch.bmm(bases.transpose(1, 2), bases) + self.beta * torch.eye(
+            self.R
+        ).repeat(x.shape[0], 1, 1).to(device)
         temp = torch.inverse(temp)
 
         # (B * S, D, N)^T @ (B * S, D, R) @ (B * S, R, R) -> (B * S, N, R)
@@ -227,7 +224,6 @@ class NMF2D(_MatrixDecomposition2DBase):
 
     def _build_bases(self, B, S, D, R, device):
         bases = torch.rand((B * S, D, R)).to(device)
-
 
         bases = F.normalize(bases, dim=1)
 
@@ -263,9 +259,7 @@ class NMF2D(_MatrixDecomposition2DBase):
 
 
 def get_hams(key):
-    hams = {'VQ':VQ2D,
-            'CD':CD2D,
-            'NMF':NMF2D}
+    hams = {"VQ": VQ2D, "CD": CD2D, "NMF": NMF2D}
 
     assert key in hams
 
