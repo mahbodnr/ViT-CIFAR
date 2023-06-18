@@ -313,7 +313,7 @@ if __name__ == "__main__":
         directory="imgs",
     )
     hamburger = HamburgerTransformerEncoder(
-        burger="NMF",
+        burger="V1",
         features=input_size[-1],
         seq_len=input_size[1],
         mlp_hidden=256,
@@ -327,7 +327,7 @@ if __name__ == "__main__":
         directory="imgs",
     )
     hamburger_attention = HamburgerAttentionTransformerEncoder(
-        burger="NMF",
+        burger="V1",
         features=input_size[-1],
         seq_len=input_size[1],
         mlp_hidden=256,
