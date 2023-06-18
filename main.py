@@ -93,7 +93,7 @@ test_dl = torch.utils.data.DataLoader(
 if __name__ == "__main__":
     experiment_name = get_experiment_name(args)
     args.experiment_name = experiment_name
-    args.input_size = train_ds[0][0].shape[-1]
+    args.input_size = train_ds[0][0].unsqueeze(0).shape
     print(f"Experiment: {experiment_name}")
     if args.comet_api_key:
         print("[INFO] Log with Comet.ml!")
