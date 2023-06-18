@@ -185,6 +185,24 @@ class AttentionFreeTransformerEncoder(TransformerEncoder):
         else:
             raise ValueError(f"mode must be one of 'full', 'local', 'conv'. Got {mode}")
 
+class Hamburger(nn.Module):
+    def __init__(
+        self,
+        version: str,
+        in_c: int,
+        ham_type: str= "NMF",
+        MD_D: int= 512,
+    ):
+        super().__init__()
+        hamburger_args= {
+            "HAM_TYPE": ham_type,
+            'MD_D': MD_D,
+        }
+        self.model = get_hamburger(version)(in_c= in_c, args= hamburger_args)
+    
+    def forward(self, x):
+        return self.model(x.unsqueeze(-1)).squeeze(-1)
+    
 class HamburgerAttention(nn.Module):
     def __init__(
         self,
@@ -199,11 +217,7 @@ class HamburgerAttention(nn.Module):
         features: the embedding dimension of the tokens
         hidden_dim: the hidden dimension used inside AFT Full
         """
-        hamburger_args= {
-            "HAM_TYPE": "NMF",
-            'MD_D': 512,
-        }
-        self.hamburger = get_hamburger(burger)(in_c= 1, args= hamburger_args)
+        self.hamburger = Hamburger(burger, seq_len)
         self.features = features
         self.Wq = nn.Linear(features, features)
         self.Wk = nn.Linear(features, features)
@@ -217,12 +231,31 @@ class HamburgerAttention(nn.Module):
         K = self.Wk(x)
         Q = self.Wq(x)
         V = self.Wv(x)
-        K = self.hamburger(K.unsqueeze(1)).squeeze(1)
+        K = self.hamburger(K)
         weighted = torch.sum(F.softmax(K, dim=1) * V, dim=1, keepdim=True)
         Yt = torch.mul(torch.sigmoid(Q), weighted)
         output = self.dropout(self.out_project(Yt))
         return output
     
+class HamburgerAttentionTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        burger: str,
+        features: int,
+        seq_len: int,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+    ):
+        super(HamburgerAttentionTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout
+        )
+        self.attention = HamburgerAttention(
+            burger,
+            features,
+            seq_len,
+            dropout=dropout,
+        )
+
 
 class HamburgerTransformerEncoder(TransformerEncoder):
     def __init__(
@@ -236,11 +269,9 @@ class HamburgerTransformerEncoder(TransformerEncoder):
         super(HamburgerTransformerEncoder, self).__init__(
             features, mlp_hidden, 1, dropout
         )
-        self.attention = HamburgerAttention(
-            burger,
-            features,
-            seq_len,
-            dropout=dropout,
+        self.attention = Hamburger(
+            version=burger,
+            in_c=seq_len,
         )
 
 if __name__ == "__main__":

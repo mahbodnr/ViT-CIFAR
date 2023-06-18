@@ -13,7 +13,7 @@ parser.add_argument(
     "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
 parser.add_argument(
-    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple", "hamburger"]
+    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple", "hamburger", "hamburger_attention"]
 )
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)

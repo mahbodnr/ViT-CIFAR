@@ -39,7 +39,7 @@ class _MatrixDecomposition2DBase(nn.Module):
         # print('eta', self.eta)
         # print('rand_init', self.rand_init)
 
-    def _build_bases(self, B, S, D, R, cuda=False):
+    def _build_bases(self, B, S, D, R, device):
         raise NotImplementedError
 
     def local_step(self, x, bases, coef):
@@ -74,12 +74,12 @@ class _MatrixDecomposition2DBase(nn.Module):
             x = x.view(B * self.S, N, D).transpose(1, 2)
 
         if not self.rand_init and not hasattr(self, 'bases'):
-            bases = self._build_bases(1, self.S, D, self.R, cuda=True)
+            bases = self._build_bases(1, self.S, D, self.R, x.device)
             self.register_buffer('bases', bases)
 
         # (S, D, R) -> (B * S, D, R)
         if self.rand_init:
-            bases = self._build_bases(B, self.S, D, self.R, cuda=True)
+            bases = self._build_bases(B, self.S, D, self.R, x.device)
         else:
             bases = self.bases.repeat(B, 1, 1)
 
@@ -120,11 +120,9 @@ class VQ2D(_MatrixDecomposition2DBase):
     def __init__(self, args):
         super().__init__(args)
 
-    def _build_bases(self, B, S, D, R, cuda=False):
-        if cuda:
-            bases = torch.randn((B * S, D, R)).cuda()
-        else:
-            bases = torch.randn((B * S, D, R))
+    def _build_bases(self, B, S, D, R, device):
+        bases = torch.randn((B * S, D, R)).to(device)
+
 
         bases = F.normalize(bases, dim=1)
 
@@ -179,11 +177,9 @@ class CD2D(_MatrixDecomposition2DBase):
         self.beta = getattr(args, 'BETA', 0.1)
         print('beta', self.beta)
 
-    def _build_bases(self, B, S, D, R, cuda=False):
-        if cuda:
-            bases = torch.randn((B * S, D, R)).cuda()
-        else:
-            bases = torch.randn((B * S, D, R))
+    def _build_bases(self, B, S, D, R, device):
+        bases = torch.randn((B * S, D, R)).to(device)
+
 
         bases = F.normalize(bases, dim=1)
 
@@ -214,7 +210,7 @@ class CD2D(_MatrixDecomposition2DBase):
     def compute_coef(self, x, bases, _):
         # [(B * S, R, D) @ (B * S, D, R) + (B * S, R, R)] ^ (-1) -> (B * S, R, R)
         temp = torch.bmm(bases.transpose(1, 2), bases) \
-            + self.beta * torch.eye(self.R).repeat(x.shape[0], 1, 1).cuda()
+            + self.beta * torch.eye(self.R).repeat(x.shape[0], 1, 1).to(device)
         temp = torch.inverse(temp)
 
         # (B * S, D, N)^T @ (B * S, D, R) @ (B * S, R, R) -> (B * S, N, R)
@@ -229,11 +225,9 @@ class NMF2D(_MatrixDecomposition2DBase):
 
         self.inv_t = 1
 
-    def _build_bases(self, B, S, D, R, cuda=False):
-        if cuda:
-            bases = torch.rand((B * S, D, R)).cuda()
-        else:
-            bases = torch.rand((B * S, D, R))
+    def _build_bases(self, B, S, D, R, device):
+        bases = torch.rand((B * S, D, R)).to(device)
+
 
         bases = F.normalize(bases, dim=1)
 
