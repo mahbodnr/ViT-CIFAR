@@ -312,3 +312,31 @@ if __name__ == "__main__":
         save_graph=True,
         directory="imgs",
     )
+    hamburger = HamburgerTransformerEncoder(
+        burger="NMF",
+        features=input_size[-1],
+        seq_len=input_size[1],
+        mlp_hidden=256,
+    )
+    draw_graph(
+        hamburger,
+        graph_name="Hamburger Transformer Encoder",
+        input_size=input_size,
+        expand_nested=True,
+        save_graph=True,
+        directory="imgs",
+    )
+    hamburger_attention = HamburgerAttentionTransformerEncoder(
+        burger="NMF",
+        features=input_size[-1],
+        seq_len=input_size[1],
+        mlp_hidden=256,
+    )
+    draw_graph(
+        hamburger_attention,
+        graph_name="Hamburger Attention Transformer Encoder",
+        input_size=input_size,
+        expand_nested=True,
+        save_graph=True,
+        directory="imgs",
+    )

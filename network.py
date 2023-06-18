@@ -3,6 +3,8 @@ import pytorch_lightning as pl
 import warmup_scheduler
 import torchvision
 import torch
+from torchview import draw_graph
+
 
 from da import CutMix, MixUp
 from utils import get_model, get_criterion
@@ -125,4 +127,12 @@ class Net(pl.LightningModule):
     def _log_image(self, image):
         grid = torchvision.utils.make_grid(image, nrow=4)
         self.logger.experiment.log_image(grid.permute(1, 2, 0))
-        print("[INFO] LOG IMAGE!!!")
+        draw_graph(
+            self.model,
+            graph_name=self.hparams.experiment_name,
+            input_size=self.hparams.input_size,
+            expand_nested=True,
+            save_graph=True,
+            directory="imgs",
+        )
+        self.logger.experiment.log_image(f"imgs/{self.hparams.experiment_name}.gv.png")

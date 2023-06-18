@@ -91,6 +91,8 @@ test_dl = torch.utils.data.DataLoader(
 
 if __name__ == "__main__":
     experiment_name = get_experiment_name(args)
+    args.experiment_name = experiment_name
+    args.input_size = train_ds[0][0].shape[-1]
     print(experiment_name)
     if args.comet_api_key:
         print("[INFO] Log with Comet.ml!")
@@ -100,11 +102,9 @@ if __name__ == "__main__":
             project_name=args.project_name,
             experiment_name=experiment_name,
         )
-        refresh_rate = 0
     else:
         print("[INFO] Log with CSV")
         logger = pl.loggers.CSVLogger(save_dir="logs", name=experiment_name)
-        refresh_rate = 1
     net = Net(args)
     trainer = pl.Trainer(
         precision=args.precision,
