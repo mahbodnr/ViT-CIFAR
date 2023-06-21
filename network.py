@@ -7,13 +7,12 @@ from torchview import draw_graph
 
 
 from da import CutMix, MixUp
-from utils import get_model, get_criterion
+from utils import get_model, get_criterion, get_layer_outputs
 
 
 class Net(pl.LightningModule):
     def __init__(self, hparams):
         super(Net, self).__init__()
-        # self.hparams = hparams
         self.hparams.update(vars(hparams))
         self.model = get_model(hparams)
         self.criterion = get_criterion(hparams)
@@ -84,36 +83,26 @@ class Net(pl.LightningModule):
         for name, param in self.model.named_parameters():
             if torch.isnan(param).any():
                 raise ValueError(f"[ERROR] {name} has nan value. Training stopped.")
-        # log weights and gradients
+        # log weights and layer outputs
         try:
             if not self.hparams.dry_run:
+                # log the output of each layer
+                layer_outputs = get_layer_outputs(self.model, self.hparams.sample_input_data)
+                for name, output in layer_outputs.items():
+                    self.logger.experiment.log_histogram_3d(
+                        output.detach().cpu().numpy(),
+                        name=name + ".output",
+                        epoch=self.current_epoch,
+                    )
+                # log weights
                 for name, param in self.model.named_parameters():
                     self.logger.experiment.log_histogram_3d(
                         param.detach().cpu().numpy(),
                         name=name,
-                        step=self.current_epoch,
-                        metadata= {"layer": name.split(".")[0]}
-                    )
-                    if param.grad is not None: # cls_token has no grad
-                        self.logger.experiment.log_histogram_3d(
-                            param.grad.detach().cpu().numpy(),
-                            name=name + "_grad",
-                            step=self.current_epoch,
-                            metadata= {"layer": name.split(".")[0]}
-                        )
-                    # Plot w
-                    if name.endswith("attention.w"):
-                        self.logger.experiment.log_confusion_matrix(
-                            matrix= param.detach().cpu().numpy(),
-                            title=name, 
-                            row_label="Tokens",
-                            column_label="Tokens", 
-                            file_name=f"{name}.json", 
-                            step=self.current_epoch,
-                            epoch=self.current_epoch,
-                        )                        
+                        epoch=self.current_epoch,
+                    )        
         except Exception as e:
-            print(f"\n[INFO] Failed to log weights and gradients. {e}")
+            print(f"\n[ERROR] Failed to log weights and gradients. {e}")
 
     def validation_step(self, batch, batch_idx):
         img, label = batch

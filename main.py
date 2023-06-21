@@ -75,6 +75,7 @@ args.num_classes = {
 
 
 train_ds, test_ds = get_dataset(args)
+args.sample_input_data = train_ds[0:10].to("cuda" if args.gpus else "cpu")
 train_dl = torch.utils.data.DataLoader(
     train_ds,
     batch_size=args.batch_size,

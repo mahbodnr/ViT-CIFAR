@@ -12,6 +12,32 @@ aft_models = {
 }
 
 
+def get_layer_outputs(model, input):
+    layer_outputs = {}
+
+    def hook(module, input, output):
+        layer_name = f"{module.__class__.__name__}_{module.parent_name}"
+        layer_outputs[layer_name] = output.detach()
+
+    # Add parent name attribute to each module
+    for name, module in model.named_modules():
+        module.parent_name = name
+
+    # Register the hook to each layer in the model
+    for module in model.modules():
+        module.register_forward_hook(hook)
+
+    # Pass the input through the model
+    _ = model(input)
+
+    # Remove the hooks and parent name attribute
+    for module in model.modules():
+        module._forward_hooks.clear()
+        delattr(module, 'parent_name')
+
+    return layer_outputs
+
+
 def get_criterion(args):
     if args.criterion == "ce":
         if args.label_smoothing:
