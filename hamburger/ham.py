@@ -15,8 +15,7 @@ class _MatrixDecomposition2DBase(nn.Module):
     def __init__(self, args):
         super().__init__()
 
-        self.spatial = getattr(args, "SPATIAL", True)
-
+        self.spatial = not getattr(args, "DEPTHWISE", True)
         self.S = getattr(args, "MD_S", 1)
         self.D = getattr(args, "MD_D", 512)
         self.R = getattr(args, "MD_R", 64)
@@ -29,7 +28,7 @@ class _MatrixDecomposition2DBase(nn.Module):
 
         self.rand_init = getattr(args, "RAND_INIT", True)
 
-        # print('spatial', self.spatial)
+        print('spatial', self.spatial)
         # print('S', self.S)
         # print('D', self.D)
         # print('R', self.R)

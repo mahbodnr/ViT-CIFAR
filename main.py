@@ -13,7 +13,7 @@ parser.add_argument(
     "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
 parser.add_argument(
-    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple", "hamburger", "hamburger_attention"]
+    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple", "hamburger", "hamburger_attention", "gnnmf"]
 )
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
@@ -35,14 +35,18 @@ parser.add_argument("--smoothing", default=0.1, type=float)
 parser.add_argument("--rcpaste", action="store_true")
 parser.add_argument("--cutmix", action="store_true")
 parser.add_argument("--mixup", action="store_true")
+parser.add_argument("--depthwise", action="store_true", help="Apply depthwise operation in Hamburger Matrix Decomposition (MD). This is equal to transpose the input matrix for MD.")
 parser.add_argument("--dropout", default=0.0, type=float)
 parser.add_argument("--head", default=12, type=int)
-parser.add_argument("--num-layers", default=7, type=int)
+parser.add_argument("--num-layers", default=3, type=int)
 parser.add_argument("--hidden", default=384, type=int)
-parser.add_argument("--mlp-hidden", default=384 * 4, type=int)
+parser.add_argument("--ffn-features", default=384, type=int)
+parser.add_argument("--mlp-hidden", default=384, type=int)
+# In original paper, mlp_hidden is set to: hidden*4
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--no-query", action="store_false", dest="query")
-parser.add_argument("--burger-mode", default="V1", type=str, choices=["V1", "V2", "V2+"])
+parser.add_argument("--no-pos-emb", action="store_false", dest="pos_emb")
+parser.add_argument("--burger-mode", default="V1", type=str, choices=["V1", "V2", "V2+", "Gated"])
 parser.add_argument("--factorization-dimension", default=32, type=int)
 parser.add_argument("--off-cls-token", action="store_false", dest="is_cls_token")
 parser.add_argument(
@@ -51,8 +55,8 @@ parser.add_argument(
     type=str,
     choices=["medium", "high", "highest"],
 )
-parser.add_argument("--seed", default=42, type=int)
-parser.add_argument("--project-name", default="VisionTransformer")
+parser.add_argument("--seed", default=2045, type=int) # Singularity is near
+parser.add_argument("--project-name", default="Rethinking-Transformers", type=str)
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
@@ -69,10 +73,6 @@ args.num_classes = {
     "svhn": 10,
 }[args.dataset]
 
-if args.mlp_hidden != args.hidden * 4:
-    print(
-        f"[INFO] In original paper, mlp_hidden(CURRENT:{args.mlp_hidden}) is set to: {args.hidden*4}(={args.hidden}*4)"
-    )
 
 train_ds, test_ds = get_dataset(args)
 train_dl = torch.utils.data.DataLoader(

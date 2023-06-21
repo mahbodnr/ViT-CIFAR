@@ -76,7 +76,7 @@ class CIFAR10Policy(object):
     def __init__(self, fillcolor=(128, 128, 128)):
         self.policies = [
             SubPolicy(0.1, "invert", 7, 0.2, "contrast", 6, fillcolor),
-            SubPolicy(0.7, "rotate", 2, 0.3, "translateX", 9, fillcolor),
+            # SubPolicy(0.7, "rotate", 2, 0.3, "translateX", 9, fillcolor),
             SubPolicy(0.8, "sharpness", 1, 0.9, "sharpness", 3, fillcolor),
             SubPolicy(0.5, "shearY", 8, 0.7, "translateY", 9, fillcolor),
             SubPolicy(0.5, "autocontrast", 8, 0.9, "equalize", 2, fillcolor),
@@ -179,7 +179,7 @@ class SubPolicy(object):
             "translateY": np.linspace(0, 150 / 331, 10),
             "rotate": np.linspace(0, 30, 10),
             "color": np.linspace(0.0, 0.9, 10),
-            "posterize": np.round(np.linspace(8, 4, 10), 0).astype(np.int),
+            "posterize": np.round(np.linspace(8, 4, 10), 0).astype(int),
             "solarize": np.linspace(256, 0, 10),
             "contrast": np.linspace(0.0, 0.9, 10),
             "sharpness": np.linspace(0.0, 0.9, 10),

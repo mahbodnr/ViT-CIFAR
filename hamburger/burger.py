@@ -14,7 +14,6 @@ from torch.nn.modules.batchnorm import _BatchNorm
 from .bread import ConvBNReLU, norm_layer
 from .ham import get_hams
 
-
 class HamburgerV1(nn.Module):
     def __init__(self, in_c, args=None):
         super().__init__()
@@ -210,7 +209,8 @@ class HamburgerV2Plus(nn.Module):
 def get_hamburger(version):
     burgers = {'V1':HamburgerV1,
                'V2':HamburgerV2,
-               'V2+': HamburgerV2Plus}
+               'V2+': HamburgerV2Plus,
+               }
 
     assert version in burgers
 

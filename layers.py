@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from hamburger import get_hamburger
+from hamburger.ham import NMF2D
+from utils import Args
+
 
 class TransformerEncoder(nn.Module):
     def __init__(
@@ -131,11 +134,6 @@ class AFTSimple(nn.Module):
         max_seqlen: the maximum number of timesteps (sequence length) to be fed in
         features: the embedding dimension of the tokens
         hidden_dim: the hidden dimension used inside AFT Full
-
-        Number of heads is 1 as done in the paper
-        w ∈ R^{T×T} is the learned pair-wise position biases
-        we assume the query, key and value are the same dimension within each head,
-        and the output dimension matches that of the input.
         """
         if head > 1:
             raise NotImplementedError
@@ -159,6 +157,7 @@ class AFTSimple(nn.Module):
             Yt = torch.mul(torch.sigmoid(Q), Yt)
         output = self.dropout(self.out_project(Yt))
         return output
+
 
 class AttentionFreeTransformerEncoder(TransformerEncoder):
     def __init__(
@@ -195,32 +194,36 @@ class AttentionFreeTransformerEncoder(TransformerEncoder):
         else:
             raise ValueError(f"mode must be one of 'full', 'local', 'conv'. Got {mode}")
 
+
 class Hamburger(nn.Module):
     def __init__(
         self,
         version: str,
         in_c: int,
-        ham_type: str= "NMF",
-        MD_D: int= 512,
+        depthwise: bool = False,
+        ham_type: str = "NMF",
+        MD_D: int = 512,
     ):
         super().__init__()
-        hamburger_args= {
-            "HAM_TYPE": ham_type,
-            'MD_D': MD_D,
-        }
-        self.model = get_hamburger(version)(in_c= in_c, args= hamburger_args)
-    
+        hamburger_args = Args()
+        hamburger_args.HAM_TYPE = ham_type
+        hamburger_args.MD_D = MD_D
+        hamburger_args.DEPTHWISE = depthwise
+        self.model = get_hamburger(version)(in_c=in_c, args=hamburger_args)
+
     def forward(self, x):
-        return self.model(x.unsqueeze(-1)).squeeze(-1)
-    
+        return self.model(x)
+
+
 class HamburgerAttention(nn.Module):
     def __init__(
         self,
         burger: str,
         features: int,
         seq_len: int,
+        depthwise: bool = False,
         dropout: float = 0.0,
-        query: bool= True,
+        query: bool = True,
     ):
         super().__init__()
         """
@@ -229,7 +232,7 @@ class HamburgerAttention(nn.Module):
         hidden_dim: the hidden dimension used inside AFT Full
         """
         self.query = query
-        self.hamburger = Hamburger(burger, seq_len)
+        self.hamburger = Hamburger(burger, seq_len, depthwise=depthwise)
         self.features = features
         # self.Wk = nn.Linear(features, features)
         self.Wv = nn.Linear(features, features)
@@ -250,13 +253,15 @@ class HamburgerAttention(nn.Module):
             Yt = torch.mul(torch.sigmoid(Q), Yt)
         output = self.dropout(self.out_project(Yt))
         return output
-    
+
+
 class HamburgerAttentionTransformerEncoder(TransformerEncoder):
     def __init__(
         self,
         burger: str,
         features: int,
         seq_len: int,
+        depthwise: bool,
         mlp_hidden: int,
         dropout: float = 0.0,
         query: bool = True,
@@ -268,6 +273,7 @@ class HamburgerAttentionTransformerEncoder(TransformerEncoder):
             burger,
             features,
             seq_len,
+            depthwise=depthwise,
             dropout=dropout,
             query=query,
         )
@@ -279,6 +285,7 @@ class HamburgerTransformerEncoder(TransformerEncoder):
         burger: str,
         features: int,
         seq_len: int,
+        depthwise: bool,
         mlp_hidden: int,
         dropout: float = 0.0,
     ):
@@ -288,7 +295,52 @@ class HamburgerTransformerEncoder(TransformerEncoder):
         self.attention = Hamburger(
             version=burger,
             in_c=seq_len,
+            depthwise=depthwise,
         )
+
+
+class GatedNNMF(nn.Module):
+    def __init__(self, features, ffn_features, depthwise=True):
+        super().__init__()
+        assert ffn_features % 2 == 0
+        self.features = features
+        self.ffn_features = ffn_features
+        self.U = nn.Linear(features, ffn_features)
+        self.V = nn.Linear(ffn_features // 2, features)
+        self.activation = nn.GELU()
+        self.norm1 = nn.LayerNorm([features])
+        self.norm2 = nn.LayerNorm([ffn_features // 2])
+
+        NNMF_args = Args()
+        NNMF_args.DEPTHWISE = depthwise
+        self.NNMF = NMF2D(NNMF_args)
+
+    def forward(self, x):
+        shortcut = x.clone()
+        x = self.norm1(x)
+        x = self.activation(self.U(x))
+        z1, z2 = torch.chunk(x, 2, dim=-1)
+        z2 = self.norm2(z2)
+        z2 = self.NNMF(F.relu(z2).unsqueeze(-1)).squeeze(-1)
+        x = z1 * z2
+        x = self.V(x)
+        return x
+
+
+class GatedNNMFTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        features: int,
+        ffn_features: int,
+        depthwise: bool,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+    ):
+        super(GatedNNMFTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout
+        )
+        self.attention = GatedNNMF(features, ffn_features, depthwise)
+
 
 if __name__ == "__main__":
     from torchview import draw_graph

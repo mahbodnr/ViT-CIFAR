@@ -6,7 +6,8 @@ from layers import (
     TransformerEncoder, 
     AttentionFreeTransformerEncoder,
     HamburgerAttentionTransformerEncoder, 
-    HamburgerTransformerEncoder
+    HamburgerTransformerEncoder,
+    GatedNNMFTransformerEncoder,
 )
 
 class ViT(nn.Module):
@@ -94,6 +95,7 @@ class AttentionFreeViT(ViT):
         head: int = 1,
         is_cls_token: bool = True,
         query: bool = True,
+        pos_emb: bool = True,
     ):
         super(AttentionFreeViT, self).__init__(
             in_c,
@@ -123,12 +125,15 @@ class AttentionFreeViT(ViT):
                 for _ in range(num_layers)
             ]
         )
+        if not pos_emb:
+            self.pos_emb = torch.zeros_like(self.pos_emb, requires_grad=False)
 
 class HamburgerAttentionViT(ViT):
     def __init__(
         self,
         burger_mode,
         seq_len: int,
+        depthwise: bool,
         in_c: int = 3,
         num_classes: int = 10,
         img_size: int = 224,
@@ -140,6 +145,7 @@ class HamburgerAttentionViT(ViT):
         head: int = 1,
         is_cls_token: bool = True,
         query: bool = True,
+        pos_emb: bool = True,
     ):
         super(HamburgerAttentionViT, self).__init__(
             in_c,
@@ -159,6 +165,7 @@ class HamburgerAttentionViT(ViT):
                     burger= burger_mode,
                     features= hidden,
                     seq_len= seq_len,
+                    depthwise= depthwise,
                     mlp_hidden= mlp_hidden,
                     dropout= dropout,
                     query= query,
@@ -166,12 +173,15 @@ class HamburgerAttentionViT(ViT):
                 for _ in range(num_layers)
             ]
         )
+        if not pos_emb:
+            self.pos_emb = torch.zeros_like(self.pos_emb, requires_grad=False)
 
 class HamburgerViT(ViT):
     def __init__(
         self,
         burger_mode,
         seq_len: int,
+        depthwise: bool,
         in_c: int = 3,
         num_classes: int = 10,
         img_size: int = 224,
@@ -182,6 +192,7 @@ class HamburgerViT(ViT):
         mlp_hidden: int = 768 * 4,
         head: int = 1,
         is_cls_token: bool = True,
+        pos_emb: bool = True,
     ):
         super(HamburgerViT, self).__init__(
             in_c,
@@ -201,13 +212,59 @@ class HamburgerViT(ViT):
                     burger= burger_mode,
                     features= hidden,
                     seq_len= seq_len,
+                    depthwise= depthwise,
                     mlp_hidden= mlp_hidden,
                     dropout= dropout,
                 )
                 for _ in range(num_layers)
             ]
         )
-        
+        if not pos_emb:
+            self.pos_emb = torch.zeros_like(self.pos_emb, requires_grad=False)
+
+class GatedNNMFViT(ViT):
+    def __init__(
+        self,
+        in_c: int = 3,
+        num_classes: int = 10,
+        img_size: int = 224,
+        patch: int = 16,
+        dropout: float = 0.0,
+        num_layers: int = 12,
+        hidden: int = 768,
+        ffn_features: int = 3072,
+        depthwise: bool = True,
+        mlp_hidden: int = 768 * 4,
+        head: int = 1,
+        is_cls_token: bool = True,
+        pos_emb: bool = True,
+    ):
+        super(GatedNNMFViT, self).__init__(
+            in_c,
+            num_classes,
+            img_size,
+            patch,
+            dropout,
+            num_layers,
+            hidden,
+            mlp_hidden,
+            head,
+            is_cls_token,
+        )
+        self.enc = nn.Sequential(
+            *[
+                GatedNNMFTransformerEncoder(
+                    features= hidden,
+                    ffn_features= ffn_features,
+                    depthwise= depthwise,
+                    mlp_hidden= mlp_hidden,
+                    dropout= dropout,
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        if not pos_emb:
+            self.pos_emb = torch.zeros_like(self.pos_emb, requires_grad=False)
 
 if __name__ == "__main__":
     from torchview import draw_graph

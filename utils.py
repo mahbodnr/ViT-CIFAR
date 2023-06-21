@@ -66,6 +66,7 @@ def get_model(args):
         net = HamburgerAttentionViT(
             burger_mode=args.burger_mode,
             seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            depthwise=args.depthwise,
             in_c=args.in_c,
             num_classes=args.num_classes,
             img_size=args.size,
@@ -83,6 +84,7 @@ def get_model(args):
         net = HamburgerViT(
             burger_mode=args.burger_mode,
             seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            depthwise=args.depthwise,
             in_c=args.in_c,
             num_classes=args.num_classes,
             img_size=args.size,
@@ -94,6 +96,23 @@ def get_model(args):
             head=args.head,
             is_cls_token=args.is_cls_token,
         )
+    elif args.model_name == "gnnmf":
+        from vit import GatedNNMFViT
+        net = GatedNNMFViT(
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            img_size=args.size,
+            patch=args.patch,
+            dropout=args.dropout,
+            num_layers=args.num_layers,
+            hidden=args.hidden,
+            ffn_features=args.ffn_features,
+            depthwise=args.depthwise,
+            mlp_hidden=args.mlp_hidden,
+            head=args.head,
+            is_cls_token=args.is_cls_token,
+        )
+
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 
@@ -200,3 +219,7 @@ def get_experiment_name(args):
     if not args.is_cls_token:
         experiment_name += "_gap"
     return experiment_name
+
+
+class Args:
+    pass
