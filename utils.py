@@ -33,7 +33,7 @@ def get_layer_outputs(model, input):
     # Remove the hooks and parent name attribute
     for module in model.modules():
         module._forward_hooks.clear()
-        delattr(module, 'parent_name')
+        delattr(module, "parent_name")
 
     return layer_outputs
 
@@ -62,6 +62,7 @@ def get_model(args):
             img_size=args.size,
             patch=args.patch,
             dropout=args.dropout,
+            encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             num_layers=args.num_layers,
             hidden=args.hidden,
@@ -70,6 +71,7 @@ def get_model(args):
         )
     elif args.model_name in aft_models:
         from vit import AttentionFreeViT
+
         net = AttentionFreeViT(
             mode=aft_models[args.model_name],
             seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
@@ -82,13 +84,16 @@ def get_model(args):
             dropout=args.dropout,
             num_layers=args.num_layers,
             hidden=args.hidden,
+            encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,
             is_cls_token=args.is_cls_token,
-            query= args.query,
+            query=args.query,
+            pos_emb=args.pos_emb,
         )
     elif args.model_name == "hamburger_attention":
         from vit import HamburgerAttentionViT
+
         net = HamburgerAttentionViT(
             burger_mode=args.burger_mode,
             seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
@@ -100,13 +105,16 @@ def get_model(args):
             dropout=args.dropout,
             num_layers=args.num_layers,
             hidden=args.hidden,
+            encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,
             is_cls_token=args.is_cls_token,
-            query= args.query,
+            query=args.query,
+            pos_emb=args.pos_emb,
         )
     elif args.model_name == "hamburger":
         from vit import HamburgerViT
+
         net = HamburgerViT(
             burger_mode=args.burger_mode,
             seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
@@ -118,12 +126,15 @@ def get_model(args):
             dropout=args.dropout,
             num_layers=args.num_layers,
             hidden=args.hidden,
+            encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,
             is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
         )
     elif args.model_name == "gnnmf":
         from vit import GatedNNMFViT
+
         net = GatedNNMFViT(
             in_c=args.in_c,
             num_classes=args.num_classes,
@@ -134,11 +145,31 @@ def get_model(args):
             hidden=args.hidden,
             ffn_features=args.ffn_features,
             depthwise=args.depthwise,
+            encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,
             is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
         )
+    elif args.model_name == "gmlp":
+        from vit import GatedMLPViT
 
+        net = GatedMLPViT(
+            seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            img_size=args.size,
+            patch=args.patch,
+            dropout=args.dropout,
+            num_layers=args.num_layers,
+            hidden=args.hidden,
+            ffn_features=args.ffn_features,
+            encoder_mlp=args.use_encoder_mlp,
+            mlp_hidden=args.mlp_hidden,
+            head=args.head,
+            is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
+        )
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 
@@ -232,6 +263,8 @@ def get_experiment_name(args):
     experiment_name = f"{args.model_name}_{args.dataset}"
     if not args.query:
         experiment_name += "_nq"
+    if not args.use_encoder_mlp:
+        experiment_name += "_nem"
     if args.autoaugment:
         experiment_name += "_aa"
     if args.label_smoothing:

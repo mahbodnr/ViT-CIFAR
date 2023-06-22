@@ -87,7 +87,7 @@ class Net(pl.LightningModule):
         try:
             if not self.hparams.dry_run:
                 # log the output of each layer
-                layer_outputs = get_layer_outputs(self.model, self.hparams.sample_input_data)
+                layer_outputs = get_layer_outputs(self.model, self.hparams._sample_input_data)
                 for name, output in layer_outputs.items():
                     self.logger.experiment.log_histogram_3d(
                         output.detach().cpu().numpy(),
@@ -125,3 +125,13 @@ class Net(pl.LightningModule):
             directory="imgs",
         )
         self.logger.experiment.log_image(f"imgs/{self.hparams.experiment_name}.gv.png")
+        draw_graph(
+            self.model.enc[0],
+            graph_name=self.hparams.experiment_name+"_encoder_block",
+            input_size=(1, self.hparams.patch**2 + (1 if self.hparams.is_cls_token else 0), self.hparams.hidden),
+            expand_nested=True,
+            save_graph=True,
+            directory="imgs", 
+            depth= 5
+        )
+        self.logger.experiment.log_image(f"imgs/{self.hparams.experiment_name}_encoder_block.gv.png")

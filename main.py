@@ -1,4 +1,5 @@
 import argparse
+from pprint import pprint
 
 from network import Net
 import torch
@@ -13,7 +14,18 @@ parser.add_argument(
     "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
 parser.add_argument(
-    "--model-name", default="vit", type=str, choices=["vit", "aftfull", "aftsimple", "hamburger", "hamburger_attention", "gnnmf"]
+    "--model-name",
+    default="vit",
+    type=str,
+    choices=[
+        "vit",
+        "aftfull",
+        "aftsimple",
+        "hamburger",
+        "hamburger_attention",
+        "gnnmf",
+        "gmlp",
+    ],
 )
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
@@ -35,18 +47,30 @@ parser.add_argument("--smoothing", default=0.1, type=float)
 parser.add_argument("--rcpaste", action="store_true")
 parser.add_argument("--cutmix", action="store_true")
 parser.add_argument("--mixup", action="store_true")
-parser.add_argument("--depthwise", action="store_true", help="Apply depthwise operation in Hamburger Matrix Decomposition (MD). This is equal to transpose the input matrix for MD.")
+parser.add_argument(
+    "--depthwise",
+    action="store_true",
+    help="Apply depthwise operation in Hamburger Matrix Decomposition (MD). This is equal to transpose the input matrix for MD.",
+)
 parser.add_argument("--dropout", default=0.0, type=float)
 parser.add_argument("--head", default=12, type=int)
-parser.add_argument("--num-layers", default=3, type=int)
+parser.add_argument("--num-layers", default=2, type=int)
 parser.add_argument("--hidden", default=384, type=int)
-parser.add_argument("--ffn-features", default=384, type=int)
+parser.add_argument(
+    "--ffn-features",
+    default=384 * 2,
+    type=int,
+    help="Number of featurtes in hidden part of the Gated models before spliting into two parts.",
+)
 parser.add_argument("--mlp-hidden", default=384, type=int)
 # In original paper, mlp_hidden is set to: hidden*4
+parser.add_argument("--no-encoder-mlp", action="store_false", dest="use_encoder_mlp", help="Disable MLP in encoder blocks.")
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--no-query", action="store_false", dest="query")
 parser.add_argument("--no-pos-emb", action="store_false", dest="pos_emb")
-parser.add_argument("--burger-mode", default="V1", type=str, choices=["V1", "V2", "V2+", "Gated"])
+parser.add_argument(
+    "--burger-mode", default="V1", type=str, choices=["V1", "V2", "V2+", "Gated"]
+)
 parser.add_argument("--factorization-dimension", default=32, type=int)
 parser.add_argument("--off-cls-token", action="store_false", dest="is_cls_token")
 parser.add_argument(
@@ -55,7 +79,7 @@ parser.add_argument(
     type=str,
     choices=["medium", "high", "highest"],
 )
-parser.add_argument("--seed", default=2045, type=int) # Singularity is near
+parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
 parser.add_argument("--project-name", default="Rethinking-Transformers", type=str)
 args = parser.parse_args()
 
@@ -75,7 +99,6 @@ args.num_classes = {
 
 
 train_ds, test_ds = get_dataset(args)
-args.sample_input_data = train_ds[0:10].to("cuda" if args.gpus else "cpu")
 train_dl = torch.utils.data.DataLoader(
     train_ds,
     batch_size=args.batch_size,
@@ -83,6 +106,7 @@ train_dl = torch.utils.data.DataLoader(
     num_workers=args.num_workers,
     pin_memory=True,
 )
+args._sample_input_data = next(iter(train_dl))[0][0:10].to("cuda" if args.gpus else "cpu")
 test_dl = torch.utils.data.DataLoader(
     test_ds,
     batch_size=args.eval_batch_size,
@@ -92,6 +116,7 @@ test_dl = torch.utils.data.DataLoader(
 
 
 if __name__ == "__main__":
+    pprint({k: v for k, v in vars(args).items() if not k.startswith("_")})
     experiment_name = get_experiment_name(args)
     args.experiment_name = experiment_name
     args.input_size = train_ds[0][0].unsqueeze(0).shape

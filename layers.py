@@ -9,24 +9,33 @@ from utils import Args
 
 class TransformerEncoder(nn.Module):
     def __init__(
-        self, features: int, mlp_hidden: int, head: int = 8, dropout: float = 0.0
+        self,
+        features: int,
+        mlp_hidden: int,
+        head: int = 8,
+        dropout: float = 0.0,
+        use_mlp: bool = True,
     ):
         super(TransformerEncoder, self).__init__()
         self.la1 = nn.LayerNorm(features)
         self.attention = MultiHeadSelfAttention(features, head=head, dropout=dropout)
         self.la2 = nn.LayerNorm(features)
-        self.mlp = nn.Sequential(
-            nn.Linear(features, mlp_hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(mlp_hidden, features),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
+        if use_mlp:
+            self.mlp = nn.Sequential(
+                nn.Linear(features, mlp_hidden),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(mlp_hidden, features),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+        else:
+            self.mlp = None
 
     def forward(self, x):
         out = self.attention(self.la1(x)) + x
-        out = self.mlp(self.la2(out)) + out
+        if self.mlp is not None:
+            out = self.mlp(self.la2(out)) + out
         return out
 
 
@@ -170,10 +179,11 @@ class AttentionFreeTransformerEncoder(TransformerEncoder):
         factorization_dimension: int = 128,
         head: int = 1,
         dropout: float = 0.0,
+        use_mlp: bool = True,
         query: bool = True,
     ):
         super(AttentionFreeTransformerEncoder, self).__init__(
-            features, mlp_hidden, head, dropout
+            features, mlp_hidden, head, dropout, use_mlp
         )
         if mode == "full":
             self.attention = AFTFull(
@@ -264,10 +274,11 @@ class HamburgerAttentionTransformerEncoder(TransformerEncoder):
         depthwise: bool,
         mlp_hidden: int,
         dropout: float = 0.0,
+        use_mlp: bool = True,
         query: bool = True,
     ):
         super(HamburgerAttentionTransformerEncoder, self).__init__(
-            features, mlp_hidden, 1, dropout
+            features, mlp_hidden, 1, dropout, use_mlp
         )
         self.attention = HamburgerAttention(
             burger,
@@ -287,10 +298,11 @@ class HamburgerTransformerEncoder(TransformerEncoder):
         seq_len: int,
         depthwise: bool,
         mlp_hidden: int,
+        use_mlp: bool = True,
         dropout: float = 0.0,
     ):
         super(HamburgerTransformerEncoder, self).__init__(
-            features, mlp_hidden, 1, dropout
+            features, mlp_hidden, 1, dropout, use_mlp
         )
         self.attention = Hamburger(
             version=burger,
@@ -316,7 +328,6 @@ class GatedNNMF(nn.Module):
         self.NNMF = NMF2D(NNMF_args)
 
     def forward(self, x):
-        shortcut = x.clone()
         x = self.norm1(x)
         x = self.activation(self.U(x))
         z1, z2 = torch.chunk(x, 2, dim=-1)
@@ -335,11 +346,56 @@ class GatedNNMFTransformerEncoder(TransformerEncoder):
         depthwise: bool,
         mlp_hidden: int,
         dropout: float = 0.0,
+        use_mlp: bool = True,
     ):
         super(GatedNNMFTransformerEncoder, self).__init__(
-            features, mlp_hidden, 1, dropout
+            features, mlp_hidden, 1, dropout, use_mlp
         )
         self.attention = GatedNNMF(features, ffn_features, depthwise)
+
+
+class GatedMLP(nn.Module):
+    def __init__(self, seq_len, features, ffn_features):
+        super().__init__()
+        assert ffn_features % 2 == 0
+        self.features = features
+        self.ffn_features = ffn_features
+        self.U = nn.Linear(features, ffn_features)
+        self.V = nn.Linear(ffn_features // 2, features)
+        self.activation = nn.GELU()
+        self.norm1 = nn.LayerNorm([features])
+        self.norm2 = nn.LayerNorm([ffn_features // 2])
+
+        self.weight = nn.Parameter(
+            torch.zeros(seq_len, seq_len).uniform_(-0.01, 0.01), requires_grad=True
+        )
+        self.bias = nn.Parameter(torch.ones(1, seq_len, 1), requires_grad=True)
+
+    def forward(self, x):
+        x = self.norm1(x)
+        x = self.activation(self.U(x))
+        z1, z2 = torch.chunk(x, 2, dim=-1)
+        z2 = self.norm2(z2)
+        z2 = torch.einsum("ij,bjd->bid", self.weight, z2) + self.bias
+        x = z1 * z2
+        x = self.V(x)
+        return x
+
+
+class GatedMLPTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        seq_len: int,
+        features: int,
+        ffn_features: int,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+        use_mlp: bool = True,
+    ):
+        super(GatedMLPTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout, use_mlp
+        )
+        self.attention = GatedMLP(seq_len, features, ffn_features)
 
 
 if __name__ == "__main__":
