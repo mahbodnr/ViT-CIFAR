@@ -122,7 +122,6 @@ class AFTFull(nn.Module):
         exp_w = torch.exp(w - torch.max(w, dim=-1, keepdim=True)[0])
         exp_K = torch.exp(K - torch.max(K, dim=0, keepdim=True)[0])
         Yt = (exp_w @ torch.mul(exp_K, V)) / (exp_w @ exp_K)
-        # Yt = torch.einsum("tt, btf->btf", exp_w, exp_K * V) / torch.einsum("tt, btf->btf", exp_w, exp_K)
         if self.query:
             Q = self.Wq(x)
             Yt = torch.mul(torch.sigmoid(Q), Yt)
@@ -312,7 +311,7 @@ class HamburgerTransformerEncoder(TransformerEncoder):
 
 
 class GatedNNMF(nn.Module):
-    def __init__(self, features, ffn_features, depthwise=True):
+    def __init__(self, features, ffn_features, number_of_iterations, train_bases, depthwise):
         super().__init__()
         assert ffn_features % 2 == 0
         self.features = features
@@ -325,6 +324,9 @@ class GatedNNMF(nn.Module):
 
         NNMF_args = Args()
         NNMF_args.DEPTHWISE = depthwise
+        NNMF_args.TRAIN_STEPS = number_of_iterations
+        NNMF_args.EVAL_STEPS = number_of_iterations
+        NNMF_args.RAND_INIT = not train_bases
         self.NNMF = NMF2D(NNMF_args)
 
     def forward(self, x):
@@ -343,6 +345,8 @@ class GatedNNMFTransformerEncoder(TransformerEncoder):
         self,
         features: int,
         ffn_features: int,
+        MD_iterations: int,
+        train_bases: bool,
         depthwise: bool,
         mlp_hidden: int,
         dropout: float = 0.0,
@@ -351,7 +355,7 @@ class GatedNNMFTransformerEncoder(TransformerEncoder):
         super(GatedNNMFTransformerEncoder, self).__init__(
             features, mlp_hidden, 1, dropout, use_mlp
         )
-        self.attention = GatedNNMF(features, ffn_features, depthwise)
+        self.attention = GatedNNMF(features, ffn_features, MD_iterations, train_bases, depthwise)
 
 
 class GatedMLP(nn.Module):
@@ -397,6 +401,125 @@ class GatedMLPTransformerEncoder(TransformerEncoder):
         )
         self.attention = GatedMLP(seq_len, features, ffn_features)
 
+
+class LocalGlobalConvolution(nn.Module):
+    def __init__(
+        self, 
+        input_shapes, # [channels, height, width] 
+        hidden_features,
+        kernel_size: int = 1,
+        use_cls_token: bool = True,
+        normalization: str = "batch_norm",
+        ):
+        super().__init__()
+        self.use_cls_token = use_cls_token
+        self.kernel_size = kernel_size
+        self.features = features = input_shapes[0]
+        input_size = input_shapes[-1] * input_shapes[-2] 
+        self.local_conv_in = nn.Conv2d(features, hidden_features, kernel_size=kernel_size, padding= "same")
+        self.local_conv_out = nn.Conv2d(hidden_features // 2, features, kernel_size=kernel_size, padding= "same")
+        if use_cls_token:
+            self.global_transform = nn.Linear(input_size + kernel_size **2, input_size + kernel_size **2)
+        else:
+            self.global_transform = nn.Linear(input_size, input_size)
+        self.activation = nn.GELU()
+        if normalization == "layer_norm":
+            self.norm1 = nn.LayerNorm([features, input_shapes[-1] , input_shapes[-2]])
+            self.norm2 = nn.LayerNorm([hidden_features // 2, input_shapes[-1] , input_shapes[-2]])
+            raise NotImplementedError("Does not work for CLS token") # FIXME
+        elif normalization == "batch_norm":
+            self.norm1 = nn.BatchNorm2d(features)
+            self.norm2 = nn.BatchNorm2d(hidden_features // 2)
+
+    def forward(self, x, cls_token):
+        # x dimension: [batch, channels, height, width]
+        x = self.norm1(x)
+        x = self.activation(self.local_conv_in(x))
+        z1, z2 = torch.chunk(x, 2, dim=1) # split channels
+        z2 = self.norm2(z2)
+        if self.use_cls_token:
+            assert cls_token is not None, "cls_token is None"
+            # CLS token dimension: [batch, channels, kernel_size, kernel_size]
+            cls_token = self.norm1(cls_token)
+            cls_token = self.activation(self.local_conv_in(cls_token))
+            cls1, cls2 = torch.chunk(cls_token, 2, dim=1)
+            z2_cls2 = torch.cat([z2.flatten(-2), cls2.flatten(-2)], dim=-1) # [batch, channels, height * width + kernel_size * kernel_size]
+            z2_cls2 = self.global_transform(z2_cls2)
+            z2, cls2 = z2_cls2[..., :-self.kernel_size ** 2].reshape_as(z2), z2_cls2[..., -self.kernel_size ** 2:].reshape_as(cls2)
+            cls_token = cls1 * cls2
+            cls_token = self.local_conv_out(cls_token)
+        else:
+            z2 = self.global_transform(z2.flatten(-2)).reshape_as(z2)
+        x = z1 * z2
+        x = self.local_conv_out(x)
+
+        if self.use_cls_token:
+            return (x, cls_token)
+        return x
+
+
+class LocalGlobalConvolutionEncoder(nn.Module):
+    def __init__(
+        self,
+        input_shapes: List[int],
+        hidden_features: int,
+        kernel_size: int,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+        normalization: str = "batch_norm",
+        use_cls_token: bool = True,
+        use_mlp: bool = True,
+    ):
+        super(TransformerEncoder, self).__init__()
+        self.use_cls_token = use_cls_token
+        if normalization == "layer_norm":
+            raise NotImplementedError("Not implemented yet") # FIXME
+            self.la1 = nn.LayerNorm(features)
+            self.la2 = nn.LayerNorm(features)
+        elif normalization == "batch_norm":
+            self.la1 = nn.BatchNorm2d(features)
+            self.la2 = nn.BatchNorm2d(features)
+        self.attention = LocalGlobalConvolution(
+            input_shapes=input_shapes,
+            hidden_features= hidden_features,
+            kernel_size= kernel_size,
+            use_cls_token= use_cls_token,
+            normalization= normalization,
+        )
+        if use_mlp:
+            self.mlp = nn.Sequential(
+                nn.Linear(features, mlp_hidden),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(mlp_hidden, features),
+                nn.GELU(),
+                nn.Dropout(dropout),
+            )
+        else:
+            self.mlp = None
+
+    def forward(self, x):
+        if self.use_cls_token:
+            x, cls_token = x
+        else:
+            raise NotImplementedError("no CLS token has not been implemented yet") # FIXME
+        shortcut_x = x.clone()
+        shortxut_cls_token = cls_token.clone()
+
+        x = self.la1(x)
+        cls_token = self.la1(cls_token)
+        x, cls_token = self.attention(x, cls_token)
+
+        x += shortcut_x
+        cls_token += shortxut_cls_token
+
+        if self.mlp is not None:
+            x = self.mlp(self.la2(x)) + x
+            cls_token = self.mlp(self.la2(cls_token)) + cls_token
+
+        if self.use_cls_token:
+            return (x, cls_token)
+        return x
 
 if __name__ == "__main__":
     from torchview import draw_graph

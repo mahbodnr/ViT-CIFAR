@@ -25,6 +25,7 @@ parser.add_argument(
         "hamburger_attention",
         "gnnmf",
         "gmlp",
+        "lgcnn",
     ],
 )
 parser.add_argument("--patch", default=8, type=int)
@@ -50,7 +51,18 @@ parser.add_argument("--mixup", action="store_true")
 parser.add_argument(
     "--depthwise",
     action="store_true",
-    help="Apply depthwise operation in Hamburger Matrix Decomposition (MD). This is equal to transpose the input matrix for MD.",
+    help="Apply depthwise operation in Matrix Decomposition (MD). This is equal to transpose the input matrix for MD.",
+)
+parser.add_argument(
+    "--md-iter",
+    default=7,
+    type=int,
+    help="Number of iterations in Matrix Decomposition (MD).",
+)
+parser.add_argument(
+    "--train-md-bases",
+    action="store_true",
+    help="Train Matrix Decomposition (MD) bases. If False, generates random bases for each forward pass.",
 )
 parser.add_argument("--dropout", default=0.0, type=float)
 parser.add_argument("--head", default=12, type=int)
@@ -64,7 +76,18 @@ parser.add_argument(
 )
 parser.add_argument("--mlp-hidden", default=384, type=int)
 # In original paper, mlp_hidden is set to: hidden*4
-parser.add_argument("--no-encoder-mlp", action="store_false", dest="use_encoder_mlp", help="Disable MLP in encoder blocks.")
+parser.add_argument(
+    "--no-encoder-mlp",
+    action="store_false",
+    dest="use_encoder_mlp",
+    help="Disable MLP in encoder blocks.",
+)
+parser.add_argument(
+    "--kernel-size",
+    default=1,
+    type=int,
+    help="Kernel size in Local-Global CNN model. Kernel-size=1 is similar to linear layers in ViT.",
+)
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--no-query", action="store_false", dest="query")
 parser.add_argument("--no-pos-emb", action="store_false", dest="pos_emb")
@@ -79,6 +102,7 @@ parser.add_argument(
     type=str,
     choices=["medium", "high", "highest"],
 )
+parser.add_argument("--no-log-weights", action="store_false", dest="log_weights")
 parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
 parser.add_argument("--project-name", default="Rethinking-Transformers", type=str)
 args = parser.parse_args()
@@ -106,7 +130,9 @@ train_dl = torch.utils.data.DataLoader(
     num_workers=args.num_workers,
     pin_memory=True,
 )
-args._sample_input_data = next(iter(train_dl))[0][0:10].to("cuda" if args.gpus else "cpu")
+args._sample_input_data = next(iter(train_dl))[0][0:10].to(
+    "cuda" if args.gpus else "cpu"
+)
 test_dl = torch.utils.data.DataLoader(
     test_ds,
     batch_size=args.eval_batch_size,
@@ -119,7 +145,6 @@ if __name__ == "__main__":
     pprint({k: v for k, v in vars(args).items() if not k.startswith("_")})
     experiment_name = get_experiment_name(args)
     args.experiment_name = experiment_name
-    args.input_size = train_ds[0][0].unsqueeze(0).shape
     print(f"Experiment: {experiment_name}")
     if args.comet_api_key:
         print("[INFO] Log with Comet.ml!")

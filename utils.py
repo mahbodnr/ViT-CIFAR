@@ -144,6 +144,8 @@ def get_model(args):
             num_layers=args.num_layers,
             hidden=args.hidden,
             ffn_features=args.ffn_features,
+            MD_iterations=args.md_iter,
+            train_bases=args.train_md_bases,
             depthwise=args.depthwise,
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
@@ -170,6 +172,20 @@ def get_model(args):
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
         )
+
+    elif args.model_name == "lgcnn":
+        from cnn import LocalGlobalCNN
+
+        net = LocalGlobalCNN(
+        num_layers= args.num_layers,
+        in_c=args.in_c,
+        num_classes=args.num_classes,
+        n_channels=args.hidden, # Number of channels in CNN model is equivalent to the hidden embedding size in ViT
+        hidden_features=args.ffn_features, # Number of hidden features in CNN model is equivalent to the ffn features in GMLP
+        img_size=args.size,
+        kernel_size=args.kernel_size,
+        use_cls_token=args.is_cls_token,
+    )
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 
@@ -279,6 +295,13 @@ def get_experiment_name(args):
         experiment_name += "_gap"
     return experiment_name
 
+def get_experiment_tags(args):
+    tags = [args.model_name]
+    if not args.query:
+        tags.append("no-query")
+    if not args.use_encoder_mlp:
+        tags.append("no-encoder-mlp")
+    return tags
 
 class Args:
     pass

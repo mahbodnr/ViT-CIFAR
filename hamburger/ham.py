@@ -59,7 +59,7 @@ class _MatrixDecomposition2DBase(nn.Module):
     def compute_coef(self, x, bases, coef):
         raise NotImplementedError
 
-    def forward(self, x, return_bases=False):
+    def forward(self, x):
         B, C, H, W = x.shape
 
         # (B, C, H, W) -> (B * S, D, N)
@@ -99,12 +99,9 @@ class _MatrixDecomposition2DBase(nn.Module):
         # (B * H, D, R) -> (B, H, N, D)
         bases = bases.view(B, self.S, D, self.R)
 
-        if not self.rand_init and not self.training and not return_bases:
+        if not self.rand_init and self.training:
             self.online_update(bases)
 
-        # if not self.rand_init or return_bases:
-        #     return x, bases
-        # else:
         return x
 
     @torch.no_grad()
@@ -220,6 +217,7 @@ class NMF2D(_MatrixDecomposition2DBase):
         super().__init__(args)
 
         self.inv_t = 1
+        self.eta = getattr(args, "ETA", 0.1)
 
     def _build_bases(self, B, S, D, R, device):
         bases = torch.rand((B * S, D, R)).to(device)

@@ -252,6 +252,8 @@ class GatedNNMFViT(ViT):
         num_layers: int = 12,
         hidden: int = 768,
         ffn_features: int = 3072,
+        MD_iterations: int = 7,
+        train_bases: bool = True,
         depthwise: bool = True,
         encoder_mlp: bool = True,
         mlp_hidden: int = 768 * 4,
@@ -277,6 +279,8 @@ class GatedNNMFViT(ViT):
                 GatedNNMFTransformerEncoder(
                     features=hidden,
                     ffn_features=ffn_features,
+                    MD_iterations=MD_iterations,
+                    train_bases=train_bases,
                     depthwise=depthwise,
                     use_mlp=encoder_mlp,
                     mlp_hidden=mlp_hidden,
