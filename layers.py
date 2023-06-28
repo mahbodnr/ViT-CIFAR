@@ -516,10 +516,10 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         )
         if use_mlp:
             self.mlp = nn.Sequential(
-                nn.Conv2d(input_shapes[0], hidden_features, kernel_size=kernel_size, padding= "same"),
+                nn.Conv2d(input_shapes[0], mlp_hidden, kernel_size=kernel_size, padding= "same"),
                 nn.GELU(),
                 nn.Dropout(dropout),
-                nn.Conv2d(hidden_features, input_shapes[0], kernel_size=kernel_size, padding= "same"),
+                nn.Conv2d(mlp_hidden, input_shapes[0], kernel_size=kernel_size, padding= "same"),
                 nn.GELU(),
                 nn.Dropout(dropout),
             )
