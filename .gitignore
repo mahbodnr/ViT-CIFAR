@@ -1,5 +1,6 @@
 nnmf/
 
+*.bash
 *.gv
 *.gv.png
 

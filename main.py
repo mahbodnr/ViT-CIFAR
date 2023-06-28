@@ -9,7 +9,7 @@ import numpy as np
 from utils import get_dataset, get_experiment_name
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--comet-api-key", help="API Key for Comet.ml")
+parser.add_argument("--comet-api-key", help="API Key for Comet.ml", dest="_comet_api_key")
 parser.add_argument(
     "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
@@ -88,6 +88,7 @@ parser.add_argument(
     type=int,
     help="Kernel size in Local-Global CNN model. Kernel-size=1 is similar to linear layers in ViT.",
 )
+parser.add_argument("--cnn-normalization", default="batch_norm", type=str)
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--no-query", action="store_false", dest="query")
 parser.add_argument("--no-pos-emb", action="store_false", dest="pos_emb")
@@ -103,6 +104,7 @@ parser.add_argument(
     choices=["medium", "high", "highest"],
 )
 parser.add_argument("--no-log-weights", action="store_false", dest="log_weights")
+parser.add_argument("--model-summary-depth", default=-1, type=int)
 parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
 parser.add_argument("--project-name", default="Rethinking-Transformers", type=str)
 args = parser.parse_args()
@@ -146,10 +148,10 @@ if __name__ == "__main__":
     experiment_name = get_experiment_name(args)
     args.experiment_name = experiment_name
     print(f"Experiment: {experiment_name}")
-    if args.comet_api_key:
+    if args._comet_api_key:
         print("[INFO] Log with Comet.ml!")
         logger = pl.loggers.CometLogger(
-            api_key=args.comet_api_key,
+            api_key=args._comet_api_key,
             save_dir="logs",
             project_name=args.project_name,
             experiment_name=experiment_name,
@@ -166,10 +168,12 @@ if __name__ == "__main__":
         benchmark=args.benchmark,
         logger=logger,
         max_epochs=args.max_epochs,
+        enable_model_summary=True, 
+        callbacks=[pl.callbacks.ModelSummary(max_depth=args.model_summary_depth)]
     )
     trainer.fit(model=net, train_dataloaders=train_dl, val_dataloaders=test_dl)
     if not args.dry_run:
         model_path = f"weights/{experiment_name}.pth"
         torch.save(net.state_dict(), model_path)
-        if args.comet_api_key:
+        if args._comet_api_key:
             logger.experiment.log_asset(file_name=experiment_name, file_data=model_path)

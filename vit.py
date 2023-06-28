@@ -33,6 +33,7 @@ class ViT(nn.Module):
         self.patch = patch  # number of patches in one row(or col)
         self.is_cls_token = is_cls_token
         self.patch_size = img_size // self.patch
+        assert self.patch_size * self.patch == img_size, "img_size must be divisible by patch"
         f = (img_size // self.patch) ** 2 * 3  # 48 # patch vec length
         num_tokens = (self.patch**2) + 1 if self.is_cls_token else (self.patch**2)
 

@@ -7,6 +7,8 @@ from torchview import draw_graph
 
 from da import CutMix, MixUp
 from utils import get_model, get_criterion, get_layer_outputs, get_experiment_tags
+from vit import ViT
+from cnn import LocalGlobalCNN
 
 
 class Net(pl.LightningModule):
@@ -20,7 +22,7 @@ class Net(pl.LightningModule):
             self.cutmix = CutMix(hparams.size, beta=1.0)
         if hparams.mixup:
             self.mixup = MixUp(alpha=1.0)
-        self.log_image_flag = hparams.comet_api_key is None
+        self.log_image_flag = hparams._comet_api_key is None
 
     def forward(self, x):
         return self.model(x)
@@ -77,7 +79,9 @@ class Net(pl.LightningModule):
 
     def on_train_epoch_end(self):
         self.log(
-            "lr", self.optimizer.param_groups[0]["lr"], on_epoch=True,
+            "lr",
+            self.optimizer.param_groups[0]["lr"],
+            on_epoch=True,
         )
         # check if there is any nan value in model parameters
         for name, param in self.model.named_parameters():
@@ -88,7 +92,9 @@ class Net(pl.LightningModule):
             try:
                 if not self.hparams.dry_run:
                     # log the output of each layer
-                    layer_outputs = get_layer_outputs(self.model, self.hparams._sample_input_data)
+                    layer_outputs = get_layer_outputs(
+                        self.model, self.hparams._sample_input_data
+                    )
                     for name, output in layer_outputs.items():
                         self.logger.experiment.log_histogram_3d(
                             output.detach().cpu().numpy(),
@@ -101,7 +107,7 @@ class Net(pl.LightningModule):
                             param.detach().cpu().numpy(),
                             name=name,
                             epoch=self.current_epoch,
-                        )        
+                        )
             except Exception as e:
                 print(f"\n[ERROR] Failed to log weights and gradients. {e}")
 
@@ -126,16 +132,50 @@ class Net(pl.LightningModule):
             directory="imgs",
         )
         self.logger.experiment.log_image(f"imgs/{self.hparams.experiment_name}.gv.png")
-        # draw_graph(
-        #     self.model.enc[0],
-        #     graph_name=self.hparams.experiment_name+"_encoder_block",
-        #     input_size=(1, self.hparams.patch**2 + (1 if self.hparams.is_cls_token else 0), self.hparams.hidden),
-        #     expand_nested=True,
-        #     save_graph=True,
-        #     directory="imgs", 
-        #     depth= 5
-        # )
-        # self.logger.experiment.log_image(f"imgs/{self.hparams.experiment_name}_encoder_block.gv.png")
+        if isinstance(self.model, ViT):
+            draw_graph(
+                self.model.enc[0],
+                graph_name=self.hparams.experiment_name + "_encoder_block",
+                input_size=(
+                    1,
+                    self.hparams.patch**2 + (1 if self.hparams.is_cls_token else 0),
+                    self.hparams.hidden,
+                ),
+                expand_nested=True,
+                save_graph=True,
+                directory="imgs",
+                depth=5,
+            )
+            self.logger.experiment.log_image(
+                f"imgs/{self.hparams.experiment_name}_encoder_block.gv.png"
+            )
+        elif isinstance(self.model, LocalGlobalCNN):
+            draw_graph(
+                self.model.enc[0],
+                graph_name=self.hparams.experiment_name + "_encoder_block",
+                input_data=[
+                    (
+                        torch.randn(
+                            1, self.model.n_channels, self.model.patch, self.model.patch
+                        ),
+                        torch.randn(
+                            1,
+                            self.model.n_channels,
+                            self.model.kernel_size,
+                            self.model.kernel_size,
+                        ),
+                    )
+                ],
+                expand_nested=True,
+                save_graph=True,
+                directory="imgs",
+                depth=5,
+            )
+            self.logger.experiment.log_image(
+                f"imgs/{self.hparams.experiment_name}_encoder_block.gv.png"
+            )
+        else:
+            print("[WARNING] Failed to draw encoder graph.")
 
     def on_train_end(self):
         self.logger.experiment.add_tags(get_experiment_tags(self.hparams))

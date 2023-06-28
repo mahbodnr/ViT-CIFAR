@@ -26,9 +26,7 @@ class LocalGlobalCNN(nn.Module):
                 "LocalGlobalCNN does not support not using cls token"
             )
         assert hidden_features % 2 == 0, "hidden_features must be divisible by 2"
-        self.n_channels = n_channels
         self.patch = patch
-        self.kernel_size = kernel_size
         self.patch_size = img_size // self.patch
         assert self.patch_size * self.patch == img_size, "img_size must be divisible by patch"
         self.use_cls_token = use_cls_token
@@ -39,11 +37,11 @@ class LocalGlobalCNN(nn.Module):
         )
         self.in_c = in_c
         self.num_classes = num_classes
-        self.emb = nn.Conv2d(in_c, n_channels, kernel_size=self.patch_size, stride=self.patch_size)
+        self.emb = nn.Conv2d(in_c, n_channels, kernel_size=self.patch_size, stride=self.patch_size, padding="same")
         self.enc = nn.Sequential(
             *[
                 LocalGlobalConvolutionEncoder(
-                    input_shapes=(n_channels, patch, patch),
+                    input_shapes=(n_channels, img_size, img_size),
                     hidden_features=hidden_features,
                     kernel_size=kernel_size,
                     use_cls_token=use_cls_token,

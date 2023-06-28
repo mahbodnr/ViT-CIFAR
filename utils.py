@@ -183,8 +183,13 @@ def get_model(args):
         n_channels=args.hidden, # Number of channels in CNN model is equivalent to the hidden embedding size in ViT
         hidden_features=args.ffn_features, # Number of hidden features in CNN model is equivalent to the ffn features in GMLP
         img_size=args.size,
+        patch=args.patch,
         kernel_size=args.kernel_size,
         use_cls_token=args.is_cls_token,
+        mlp_hidden=args.mlp_hidden,
+        dropout=args.dropout,
+        normalization=args.cnn_normalization,
+        use_mlp=args.use_encoder_mlp,
     )
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")

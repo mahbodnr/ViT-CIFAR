@@ -6,6 +6,7 @@ from hamburger import get_hamburger
 from hamburger.ham import NMF2D
 from utils import Args
 
+from typing import Optional, Tuple, List
 
 class TransformerEncoder(nn.Module):
     def __init__(
@@ -405,7 +406,7 @@ class GatedMLPTransformerEncoder(TransformerEncoder):
 class LocalGlobalConvolution(nn.Module):
     def __init__(
         self, 
-        input_shapes, # [channels, height, width] 
+        input_shapes, # [channels, n_patches, n_patches] 
         hidden_features,
         kernel_size: int = 1,
         use_cls_token: bool = True,
@@ -432,7 +433,7 @@ class LocalGlobalConvolution(nn.Module):
             self.norm2 = nn.BatchNorm2d(hidden_features // 2)
 
     def forward(self, x, cls_token):
-        # x dimension: [batch, channels, height, width]
+        # x dimension: [batch, channels, n_patches, n_patches]
         x = self.norm1(x)
         x = self.activation(self.local_conv_in(x))
         z1, z2 = torch.chunk(x, 2, dim=1) # split channels
@@ -443,7 +444,8 @@ class LocalGlobalConvolution(nn.Module):
             cls_token = self.norm1(cls_token)
             cls_token = self.activation(self.local_conv_in(cls_token))
             cls1, cls2 = torch.chunk(cls_token, 2, dim=1)
-            z2_cls2 = torch.cat([z2.flatten(-2), cls2.flatten(-2)], dim=-1) # [batch, channels, height * width + kernel_size * kernel_size]
+            cls2 = self.norm2(cls2)
+            z2_cls2 = torch.cat([z2.flatten(-2), cls2.flatten(-2)], dim=-1) # [batch, channels, n_patches ** 2 + kernel_size ** 2]
             z2_cls2 = self.global_transform(z2_cls2)
             z2, cls2 = z2_cls2[..., :-self.kernel_size ** 2].reshape_as(z2), z2_cls2[..., -self.kernel_size ** 2:].reshape_as(cls2)
             cls_token = cls1 * cls2
@@ -461,7 +463,7 @@ class LocalGlobalConvolution(nn.Module):
 class LocalGlobalConvolutionEncoder(nn.Module):
     def __init__(
         self,
-        input_shapes: List[int],
+        input_shapes: List[int], # [channels, n_patches, n_patches] 
         hidden_features: int,
         kernel_size: int,
         mlp_hidden: int,
@@ -470,7 +472,8 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         use_cls_token: bool = True,
         use_mlp: bool = True,
     ):
-        super(TransformerEncoder, self).__init__()
+        super().__init__()
+        features = input_shapes[0]
         self.use_cls_token = use_cls_token
         if normalization == "layer_norm":
             raise NotImplementedError("Not implemented yet") # FIXME
@@ -479,6 +482,8 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         elif normalization == "batch_norm":
             self.la1 = nn.BatchNorm2d(features)
             self.la2 = nn.BatchNorm2d(features)
+        else:
+            raise ValueError(f"normalization {normalization} not supported")
         self.attention = LocalGlobalConvolution(
             input_shapes=input_shapes,
             hidden_features= hidden_features,
@@ -488,10 +493,10 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         )
         if use_mlp:
             self.mlp = nn.Sequential(
-                nn.Linear(features, mlp_hidden),
+                nn.Conv2d(input_shapes[0], hidden_features, kernel_size=kernel_size, padding= "same"),
                 nn.GELU(),
                 nn.Dropout(dropout),
-                nn.Linear(mlp_hidden, features),
+                nn.Conv2d(hidden_features, input_shapes[0], kernel_size=kernel_size, padding= "same"),
                 nn.GELU(),
                 nn.Dropout(dropout),
             )
@@ -503,8 +508,8 @@ class LocalGlobalConvolutionEncoder(nn.Module):
             x, cls_token = x
         else:
             raise NotImplementedError("no CLS token has not been implemented yet") # FIXME
-        shortcut_x = x.clone()
-        shortxut_cls_token = cls_token.clone()
+        shortcut_x = x
+        shortxut_cls_token = cls_token
 
         x = self.la1(x)
         cls_token = self.la1(cls_token)
@@ -559,30 +564,16 @@ if __name__ == "__main__":
         save_graph=True,
         directory="imgs",
     )
-    hamburger = HamburgerTransformerEncoder(
-        burger="V1",
-        features=input_size[-1],
-        seq_len=input_size[1],
-        mlp_hidden=256,
+    lgconv = LocalGlobalConvolutionEncoder(
+        input_shapes=(378, 16, 16),
+        hidden_features= 128,
+        kernel_size= 1,
+        mlp_hidden= 200,
     )
     draw_graph(
-        hamburger,
-        graph_name="Hamburger Transformer Encoder",
-        input_size=input_size,
-        expand_nested=True,
-        save_graph=True,
-        directory="imgs",
-    )
-    hamburger_attention = HamburgerAttentionTransformerEncoder(
-        burger="V1",
-        features=input_size[-1],
-        seq_len=input_size[1],
-        mlp_hidden=256,
-    )
-    draw_graph(
-        hamburger_attention,
-        graph_name="Hamburger Attention Transformer Encoder",
-        input_size=input_size,
+        lgconv,
+        graph_name="Local Global Convolution Encoder",
+        input_data= [(torch.randn(1, 378, 16, 16), torch.randn(1, 378, 1, 1))],
         expand_nested=True,
         save_graph=True,
         directory="imgs",
