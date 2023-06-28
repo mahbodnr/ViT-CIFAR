@@ -88,7 +88,7 @@ parser.add_argument(
     type=int,
     help="Kernel size in Local-Global CNN model. Kernel-size=1 is similar to linear layers in ViT.",
 )
-parser.add_argument("--cnn-normalization", default="batch_norm", type=str)
+parser.add_argument("--cnn-normalization", default="layer_norm", type=str)
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--no-query", action="store_false", dest="query")
 parser.add_argument("--no-pos-emb", action="store_false", dest="pos_emb")

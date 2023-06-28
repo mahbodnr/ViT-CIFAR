@@ -320,8 +320,7 @@ class GatedNNMF(nn.Module):
         self.U = nn.Linear(features, ffn_features)
         self.V = nn.Linear(ffn_features // 2, features)
         self.activation = nn.GELU()
-        self.norm1 = nn.LayerNorm([features])
-        self.norm2 = nn.LayerNorm([ffn_features // 2])
+        self.norm = nn.LayerNorm([ffn_features // 2])
 
         NNMF_args = Args()
         NNMF_args.DEPTHWISE = depthwise
@@ -331,10 +330,9 @@ class GatedNNMF(nn.Module):
         self.NNMF = NMF2D(NNMF_args)
 
     def forward(self, x):
-        x = self.norm1(x)
         x = self.activation(self.U(x))
         z1, z2 = torch.chunk(x, 2, dim=-1)
-        z2 = self.norm2(z2)
+        z2 = self.norm(z2)
         z2 = self.NNMF(F.relu(z2).unsqueeze(-1)).squeeze(-1)
         x = z1 * z2
         x = self.V(x)
@@ -368,8 +366,7 @@ class GatedMLP(nn.Module):
         self.U = nn.Linear(features, ffn_features)
         self.V = nn.Linear(ffn_features // 2, features)
         self.activation = nn.GELU()
-        self.norm1 = nn.LayerNorm([features])
-        self.norm2 = nn.LayerNorm([ffn_features // 2])
+        self.norm = nn.LayerNorm([ffn_features // 2])
 
         self.weight = nn.Parameter(
             torch.zeros(seq_len, seq_len).uniform_(-0.01, 0.01), requires_grad=True
@@ -377,10 +374,9 @@ class GatedMLP(nn.Module):
         self.bias = nn.Parameter(torch.ones(1, seq_len, 1), requires_grad=True)
 
     def forward(self, x):
-        x = self.norm1(x)
         x = self.activation(self.U(x))
         z1, z2 = torch.chunk(x, 2, dim=-1)
-        z2 = self.norm2(z2)
+        z2 = self.norm(z2)
         z2 = torch.einsum("ij,bjd->bid", self.weight, z2) + self.bias
         x = z1 * z2
         x = self.V(x)
@@ -428,35 +424,25 @@ class LocalGlobalConvolution(nn.Module):
             class Transpose(nn.Module):
                 def forward(self, x):
                     return x.transpose(1, -1)
-            self.norm1 = nn.Sequential(
-                Transpose(),
-                nn.LayerNorm(features),
-                Transpose(),
-            )
-            self.norm2 = nn.Sequential(
+            self.norm = nn.Sequential(
                 Transpose(),
                 nn.LayerNorm(hidden_features // 2),
                 Transpose(),
             )
-            # self.norm1 = nn.LayerNorm([features, input_shapes[-1] , input_shapes[-2]])
-            # self.norm2 = nn.LayerNorm([hidden_features // 2, input_shapes[-1] , input_shapes[-2]])
         elif normalization == "batch_norm":
-            self.norm1 = nn.BatchNorm2d(features)
-            self.norm2 = nn.BatchNorm2d(hidden_features // 2)
+            self.norm = nn.BatchNorm2d(hidden_features // 2)
 
     def forward(self, x, cls_token):
         # x dimension: [batch, channels, n_patches, n_patches]
-        x = self.norm1(x)
         x = self.activation(self.local_conv_in(x))
         z1, z2 = torch.chunk(x, 2, dim=1) # split channels
-        z2 = self.norm2(z2)
+        z2 = self.norm(z2)
         if self.use_cls_token:
             assert cls_token is not None, "cls_token is None"
             # CLS token dimension: [batch, channels, kernel_size, kernel_size]
-            cls_token = self.norm1(cls_token)
             cls_token = self.activation(self.local_conv_in(cls_token))
             cls1, cls2 = torch.chunk(cls_token, 2, dim=1)
-            cls2 = self.norm2(cls2)
+            cls2 = self.norm(cls2)
             z2_cls2 = torch.cat([z2.flatten(-2), cls2.flatten(-2)], dim=-1) # [batch, channels, n_patches ** 2 + kernel_size ** 2]
             z2_cls2 = self.global_transform(z2_cls2)
             z2, cls2 = z2_cls2[..., :-self.kernel_size ** 2].reshape_as(z2), z2_cls2[..., -self.kernel_size ** 2:].reshape_as(cls2)
