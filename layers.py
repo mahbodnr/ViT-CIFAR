@@ -425,9 +425,21 @@ class LocalGlobalConvolution(nn.Module):
             self.global_transform = nn.Linear(input_size, input_size)
         self.activation = nn.GELU()
         if normalization == "layer_norm":
-            self.norm1 = nn.LayerNorm([features, input_shapes[-1] , input_shapes[-2]])
-            self.norm2 = nn.LayerNorm([hidden_features // 2, input_shapes[-1] , input_shapes[-2]])
-            raise NotImplementedError("Does not work for CLS token") # FIXME
+            class Transpose(nn.Module):
+                def forward(self, x):
+                    return x.transpose(1, -1)
+            self.norm1 = nn.Sequential(
+                Transpose(),
+                nn.LayerNorm(features),
+                Transpose(),
+            )
+            self.norm2 = nn.Sequential(
+                Transpose(),
+                nn.LayerNorm(hidden_features // 2),
+                Transpose(),
+            )
+            # self.norm1 = nn.LayerNorm([features, input_shapes[-1] , input_shapes[-2]])
+            # self.norm2 = nn.LayerNorm([hidden_features // 2, input_shapes[-1] , input_shapes[-2]])
         elif normalization == "batch_norm":
             self.norm1 = nn.BatchNorm2d(features)
             self.norm2 = nn.BatchNorm2d(hidden_features // 2)
@@ -476,9 +488,20 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         features = input_shapes[0]
         self.use_cls_token = use_cls_token
         if normalization == "layer_norm":
-            raise NotImplementedError("Not implemented yet") # FIXME
-            self.la1 = nn.LayerNorm(features)
-            self.la2 = nn.LayerNorm(features)
+            class Transpose(nn.Module):
+                def forward(self, x):
+                    return x.transpose(1, -1)
+            self.la1 = nn.Sequential(
+                Transpose(),
+                nn.LayerNorm(features),
+                Transpose(),
+            )
+            self.la2 = nn.Sequential(
+                Transpose(),
+                nn.LayerNorm(features),
+                Transpose(),
+            )
+            # self.la2 = nn.LayerNorm([features, input_shapes[-1] , input_shapes[-2]])
         elif normalization == "batch_norm":
             self.la1 = nn.BatchNorm2d(features)
             self.la2 = nn.BatchNorm2d(features)
