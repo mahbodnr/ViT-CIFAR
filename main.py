@@ -66,7 +66,7 @@ parser.add_argument(
 )
 parser.add_argument("--dropout", default=0.0, type=float)
 parser.add_argument("--head", default=12, type=int)
-parser.add_argument("--num-layers", default=2, type=int)
+parser.add_argument("--num-layers", default=1, type=int)
 parser.add_argument("--hidden", default=384, type=int)
 parser.add_argument(
     "--ffn-features",
@@ -105,6 +105,7 @@ parser.add_argument(
 )
 parser.add_argument("--no-log-weights", action="store_false", dest="log_weights")
 parser.add_argument("--model-summary-depth", default=-1, type=int)
+parser.add_argument("--tags", default="", type=str, help="Comma separated tags.")
 parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
 parser.add_argument("--project-name", default="Rethinking-Transformers", type=str)
 args = parser.parse_args()
@@ -168,8 +169,7 @@ if __name__ == "__main__":
         benchmark=args.benchmark,
         logger=logger,
         max_epochs=args.max_epochs,
-        enable_model_summary=True, 
-        callbacks=[pl.callbacks.ModelSummary(max_depth=args.model_summary_depth)]
+        enable_model_summary=False, # Implemented seperately inside the Trainer
     )
     trainer.fit(model=net, train_dataloaders=train_dl, val_dataloaders=test_dl)
     if not args.dry_run:

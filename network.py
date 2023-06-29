@@ -45,6 +45,20 @@ class Net(pl.LightningModule):
         )
         return [self.optimizer], [self.scheduler]
 
+    def on_fit_start(self):
+        summary = pl.utilities.model_summary.ModelSummary(self, max_depth = self.hparams.model_summary_depth)
+        self.logger.experiment.log_asset_data(str(summary), file_name="model_summary.txt")
+        print(summary)
+
+    def on_train_start(self):
+        self.log("trainable_params", float(sum(p.numel() for p in self.model.parameters() if p.requires_grad)))
+        self.log("total_params", float(sum(p.numel() for p in self.model.parameters())))
+        # Get tags from hparams
+        tags = self.hparams.tags.split(",")
+        self.logger.experiment.add_tags(tags)
+        # Get tags from experiment hyperparameters
+        self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
+
     def training_step(self, batch, batch_idx):
         img, label = batch
         if self.hparams.cutmix or self.hparams.mixup:
@@ -178,5 +192,4 @@ class Net(pl.LightningModule):
             print("[WARNING] Failed to draw encoder graph.")
 
     def on_train_end(self):
-        self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
         self.logger.experiment.end()
