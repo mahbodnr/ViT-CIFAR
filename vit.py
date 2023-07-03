@@ -245,6 +245,8 @@ class HamburgerViT(ViT):
 class GatedNNMFViT(ViT):
     def __init__(
         self,
+        NNMF_type: str,
+        seq_len: int,
         in_c: int = 3,
         num_classes: int = 10,
         img_size: int = 224,
@@ -255,6 +257,7 @@ class GatedNNMFViT(ViT):
         ffn_features: int = 3072,
         MD_iterations: int = 7,
         train_bases: bool = True,
+        local_learning: bool = True,
         depthwise: bool = True,
         encoder_mlp: bool = True,
         mlp_hidden: int = 768 * 4,
@@ -278,10 +281,13 @@ class GatedNNMFViT(ViT):
         self.enc = nn.Sequential(
             *[
                 GatedNNMFTransformerEncoder(
+                    NNMF_type= NNMF_type,
+                    seq_len=seq_len,
                     features=hidden,
                     ffn_features=ffn_features,
                     MD_iterations=MD_iterations,
                     train_bases=train_bases,
+                    local_learning=local_learning,
                     depthwise=depthwise,
                     use_mlp=encoder_mlp,
                     mlp_hidden=mlp_hidden,

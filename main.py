@@ -9,7 +9,9 @@ import numpy as np
 from utils import get_dataset, get_experiment_name
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--comet-api-key", help="API Key for Comet.ml", dest="_comet_api_key")
+parser.add_argument(
+    "--comet-api-key", help="API Key for Comet.ml", dest="_comet_api_key"
+)
 parser.add_argument(
     "--dataset", default="c10", type=str, choices=["c10", "c100", "svhn"]
 )
@@ -23,7 +25,8 @@ parser.add_argument(
         "aftsimple",
         "hamburger",
         "hamburger_attention",
-        "gnnmf",
+        "gnnmf_ham",
+        "gnnmf_sbs",
         "gmlp",
         "lgcnn",
     ],
@@ -63,6 +66,11 @@ parser.add_argument(
     "--train-md-bases",
     action="store_true",
     help="Train Matrix Decomposition (MD) bases. If False, generates random bases for each forward pass.",
+)
+parser.add_argument(
+    "--local_learning",
+    action="store_true",
+    help="Enables local learning rule for SbS type NNMF instead of error backpropagation.",
 )
 parser.add_argument("--dropout", default=0.0, type=float)
 parser.add_argument("--head", default=12, type=int)
@@ -169,7 +177,7 @@ if __name__ == "__main__":
         benchmark=args.benchmark,
         logger=logger,
         max_epochs=args.max_epochs,
-        enable_model_summary=False, # Implemented seperately inside the Trainer
+        enable_model_summary=False,  # Implemented seperately inside the Trainer
     )
     trainer.fit(model=net, train_dataloaders=train_dl, val_dataloaders=test_dl)
     if not args.dry_run:

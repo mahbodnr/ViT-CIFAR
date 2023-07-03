@@ -132,10 +132,12 @@ def get_model(args):
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
         )
-    elif args.model_name == "gnnmf":
+    elif args.model_name.startswith("gnnmf"):
         from vit import GatedNNMFViT
-
+        nnmf_type = args.model_name.split("_")[1]
         net = GatedNNMFViT(
+            NNMF_type=nnmf_type,
+            seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
             in_c=args.in_c,
             num_classes=args.num_classes,
             img_size=args.size,
@@ -146,6 +148,7 @@ def get_model(args):
             ffn_features=args.ffn_features,
             MD_iterations=args.md_iter,
             train_bases=args.train_md_bases,
+            local_learning=args.local_learning,
             depthwise=args.depthwise,
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
@@ -281,7 +284,7 @@ def get_dataset(args):
 
 
 def get_experiment_name(args):
-    experiment_name = f"{args.model_name}_{args.dataset}"
+    experiment_name = f"{args.model_name}_{args.dataset}_{args.num_layers}"
     if not args.query:
         experiment_name += "_nq"
     if not args.use_encoder_mlp:
@@ -307,6 +310,3 @@ def get_experiment_tags(args):
     if not args.use_encoder_mlp:
         tags.append("no-encoder-mlp")
     return tags
-
-class Args:
-    pass

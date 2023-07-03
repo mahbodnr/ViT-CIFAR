@@ -3,10 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from hamburger import get_hamburger
-from hamburger.ham import NMF2D
-from utils import Args
+import argparse
 
 from typing import Optional, Tuple, List
+
 
 class TransformerEncoder(nn.Module):
     def __init__(
@@ -215,7 +215,7 @@ class Hamburger(nn.Module):
         MD_D: int = 512,
     ):
         super().__init__()
-        hamburger_args = Args()
+        hamburger_args = argparse.Namespace()
         hamburger_args.HAM_TYPE = ham_type
         hamburger_args.MD_D = MD_D
         hamburger_args.DEPTHWISE = depthwise
@@ -312,7 +312,17 @@ class HamburgerTransformerEncoder(TransformerEncoder):
 
 
 class GatedNNMF(nn.Module):
-    def __init__(self, features, ffn_features, number_of_iterations, train_bases, depthwise):
+    def __init__(
+        self,
+        NNMF_type,
+        seq_len,
+        features,
+        ffn_features,
+        number_of_iterations,
+        train_bases,
+        local_learning, # Only SbS
+        depthwise, # Only ham
+    ):
         super().__init__()
         assert ffn_features % 2 == 0
         self.features = features
@@ -322,18 +332,48 @@ class GatedNNMF(nn.Module):
         self.activation = nn.GELU()
         self.norm = nn.LayerNorm([ffn_features // 2])
 
-        NNMF_args = Args()
-        NNMF_args.DEPTHWISE = depthwise
-        NNMF_args.TRAIN_STEPS = number_of_iterations
-        NNMF_args.EVAL_STEPS = number_of_iterations
-        NNMF_args.RAND_INIT = not train_bases
-        self.NNMF = NMF2D(NNMF_args)
+        self.NNMF_type = NNMF_type
+        if NNMF_type == "ham":
+            from hamburger.ham import NMF2D
+
+            # add args to a argparser instance called NNMF_args
+            NNMF_args = argparse.Namespace()
+            NNMF_args.DEPTHWISE = depthwise
+            NNMF_args.TRAIN_STEPS = number_of_iterations
+            NNMF_args.EVAL_STEPS = number_of_iterations
+            NNMF_args.RAND_INIT = not train_bases
+            self.NNMF = NMF2D(NNMF_args)
+        elif NNMF_type == "sbs":
+            from nnmf.NNMFLayerSbSBP import NNMFConv2d
+
+            if not train_bases:
+                print("[Warning] SbS style NNMF called without trainable weights")
+                raise Exception("SbS style NNMF called without trainable weights")
+            if depthwise:
+                raise NotImplementedError
+            self.NNMF = NNMFConv2d(
+                number_of_input_neurons=1,  # input channes
+                number_of_neurons=seq_len,  # output channels
+                input_size=[seq_len, ffn_features // 2],
+                forward_kernel_size=[seq_len, 1],
+                number_of_iterations=number_of_iterations,
+                w_trainable=train_bases,
+                local_learning=local_learning,
+                device=torch.device("cuda"),
+                default_dtype=torch.float32,
+                dilation=(1,1),
+            )
+        else:
+            raise NotImplementedError(f"NNMF type {NNMF_type} not implemented")
 
     def forward(self, x):
         x = self.activation(self.U(x))
         z1, z2 = torch.chunk(x, 2, dim=-1)
-        z2 = self.norm(z2)
-        z2 = self.NNMF(F.relu(z2).unsqueeze(-1)).squeeze(-1)
+        z2 = F.relu(self.norm(z2))
+        if self.NNMF_type == "ham":
+            z2 = self.NNMF(z2.unsqueeze(-1)).squeeze(-1)
+        elif self.NNMF_type == "sbs":
+            z2 = self.NNMF(z2.unsqueeze(1)).squeeze(-2)
         x = z1 * z2
         x = self.V(x)
         return x
@@ -342,10 +382,13 @@ class GatedNNMF(nn.Module):
 class GatedNNMFTransformerEncoder(TransformerEncoder):
     def __init__(
         self,
+        NNMF_type: str,
+        seq_len: int,
         features: int,
         ffn_features: int,
         MD_iterations: int,
         train_bases: bool,
+        local_learning: bool,
         depthwise: bool,
         mlp_hidden: int,
         dropout: float = 0.0,
@@ -354,7 +397,16 @@ class GatedNNMFTransformerEncoder(TransformerEncoder):
         super(GatedNNMFTransformerEncoder, self).__init__(
             features, mlp_hidden, 1, dropout, use_mlp
         )
-        self.attention = GatedNNMF(features, ffn_features, MD_iterations, train_bases, depthwise)
+        self.attention = GatedNNMF(
+            NNMF_type,
+            seq_len,
+            features,
+            ffn_features,
+            MD_iterations,
+            train_bases,
+            local_learning,
+            depthwise,
+        )
 
 
 class GatedMLP(nn.Module):
@@ -401,29 +453,37 @@ class GatedMLPTransformerEncoder(TransformerEncoder):
 
 class LocalGlobalConvolution(nn.Module):
     def __init__(
-        self, 
-        input_shapes, # [channels, n_patches, n_patches] 
+        self,
+        input_shapes,  # [channels, n_patches, n_patches]
         hidden_features,
         kernel_size: int = 1,
         use_cls_token: bool = True,
         normalization: str = "batch_norm",
-        ):
+    ):
         super().__init__()
         self.use_cls_token = use_cls_token
         self.kernel_size = kernel_size
         self.features = features = input_shapes[0]
-        input_size = input_shapes[-1] * input_shapes[-2] 
-        self.local_conv_in = nn.Conv2d(features, hidden_features, kernel_size=kernel_size, padding= "same")
-        self.local_conv_out = nn.Conv2d(hidden_features // 2, features, kernel_size=kernel_size, padding= "same")
+        input_size = input_shapes[-1] * input_shapes[-2]
+        self.local_conv_in = nn.Conv2d(
+            features, hidden_features, kernel_size=kernel_size, padding="same"
+        )
+        self.local_conv_out = nn.Conv2d(
+            hidden_features // 2, features, kernel_size=kernel_size, padding="same"
+        )
         if use_cls_token:
-            self.global_transform = nn.Linear(input_size + kernel_size **2, input_size + kernel_size **2)
+            self.global_transform = nn.Linear(
+                input_size + kernel_size**2, input_size + kernel_size**2
+            )
         else:
             self.global_transform = nn.Linear(input_size, input_size)
         self.activation = nn.GELU()
         if normalization == "layer_norm":
+
             class Transpose(nn.Module):
                 def forward(self, x):
                     return x.transpose(1, -1)
+
             self.norm = nn.Sequential(
                 Transpose(),
                 nn.LayerNorm(hidden_features // 2),
@@ -435,7 +495,7 @@ class LocalGlobalConvolution(nn.Module):
     def forward(self, x, cls_token):
         # x dimension: [batch, channels, n_patches, n_patches]
         x = self.activation(self.local_conv_in(x))
-        z1, z2 = torch.chunk(x, 2, dim=1) # split channels
+        z1, z2 = torch.chunk(x, 2, dim=1)  # split channels
         z2 = self.norm(z2)
         if self.use_cls_token:
             assert cls_token is not None, "cls_token is None"
@@ -443,9 +503,13 @@ class LocalGlobalConvolution(nn.Module):
             cls_token = self.activation(self.local_conv_in(cls_token))
             cls1, cls2 = torch.chunk(cls_token, 2, dim=1)
             cls2 = self.norm(cls2)
-            z2_cls2 = torch.cat([z2.flatten(-2), cls2.flatten(-2)], dim=-1) # [batch, channels, n_patches ** 2 + kernel_size ** 2]
+            z2_cls2 = torch.cat(
+                [z2.flatten(-2), cls2.flatten(-2)], dim=-1
+            )  # [batch, channels, n_patches ** 2 + kernel_size ** 2]
             z2_cls2 = self.global_transform(z2_cls2)
-            z2, cls2 = z2_cls2[..., :-self.kernel_size ** 2].reshape_as(z2), z2_cls2[..., -self.kernel_size ** 2:].reshape_as(cls2)
+            z2, cls2 = z2_cls2[..., : -self.kernel_size**2].reshape_as(z2), z2_cls2[
+                ..., -self.kernel_size**2 :
+            ].reshape_as(cls2)
             cls_token = cls1 * cls2
             cls_token = self.local_conv_out(cls_token)
         else:
@@ -461,7 +525,7 @@ class LocalGlobalConvolution(nn.Module):
 class LocalGlobalConvolutionEncoder(nn.Module):
     def __init__(
         self,
-        input_shapes: List[int], # [channels, n_patches, n_patches] 
+        input_shapes: List[int],  # [channels, n_patches, n_patches]
         hidden_features: int,
         kernel_size: int,
         mlp_hidden: int,
@@ -474,9 +538,11 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         features = input_shapes[0]
         self.use_cls_token = use_cls_token
         if normalization == "layer_norm":
+
             class Transpose(nn.Module):
                 def forward(self, x):
                     return x.transpose(1, -1)
+
             self.la1 = nn.Sequential(
                 Transpose(),
                 nn.LayerNorm(features),
@@ -495,17 +561,21 @@ class LocalGlobalConvolutionEncoder(nn.Module):
             raise ValueError(f"normalization {normalization} not supported")
         self.attention = LocalGlobalConvolution(
             input_shapes=input_shapes,
-            hidden_features= hidden_features,
-            kernel_size= kernel_size,
-            use_cls_token= use_cls_token,
-            normalization= normalization,
+            hidden_features=hidden_features,
+            kernel_size=kernel_size,
+            use_cls_token=use_cls_token,
+            normalization=normalization,
         )
         if use_mlp:
             self.mlp = nn.Sequential(
-                nn.Conv2d(input_shapes[0], mlp_hidden, kernel_size=kernel_size, padding= "same"),
+                nn.Conv2d(
+                    input_shapes[0], mlp_hidden, kernel_size=kernel_size, padding="same"
+                ),
                 nn.GELU(),
                 nn.Dropout(dropout),
-                nn.Conv2d(mlp_hidden, input_shapes[0], kernel_size=kernel_size, padding= "same"),
+                nn.Conv2d(
+                    mlp_hidden, input_shapes[0], kernel_size=kernel_size, padding="same"
+                ),
                 nn.GELU(),
                 nn.Dropout(dropout),
             )
@@ -516,7 +586,9 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         if self.use_cls_token:
             x, cls_token = x
         else:
-            raise NotImplementedError("no CLS token has not been implemented yet") # FIXME
+            raise NotImplementedError(
+                "no CLS token has not been implemented yet"
+            )  # FIXME
         shortcut_x = x
         shortxut_cls_token = cls_token
 
@@ -534,6 +606,7 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         if self.use_cls_token:
             return (x, cls_token)
         return x
+
 
 if __name__ == "__main__":
     from torchview import draw_graph
@@ -575,14 +648,14 @@ if __name__ == "__main__":
     )
     lgconv = LocalGlobalConvolutionEncoder(
         input_shapes=(378, 16, 16),
-        hidden_features= 128,
-        kernel_size= 1,
-        mlp_hidden= 200,
+        hidden_features=128,
+        kernel_size=1,
+        mlp_hidden=200,
     )
     draw_graph(
         lgconv,
         graph_name="Local Global Convolution Encoder",
-        input_data= [(torch.randn(1, 378, 16, 16), torch.randn(1, 378, 1, 1))],
+        input_data=[(torch.randn(1, 378, 16, 16), torch.randn(1, 378, 1, 1))],
         expand_nested=True,
         save_graph=True,
         directory="imgs",
