@@ -54,8 +54,9 @@ class Net(pl.LightningModule):
         self.log("trainable_params", float(sum(p.numel() for p in self.model.parameters() if p.requires_grad)))
         self.log("total_params", float(sum(p.numel() for p in self.model.parameters())))
         # Get tags from hparams
-        tags = self.hparams.tags.split(",")
-        self.logger.experiment.add_tags(tags)
+        if self.hparams.tags:
+            tags = self.hparams.tags.split(",")
+            self.logger.experiment.add_tags(tags)
         # Get tags from experiment hyperparameters
         self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
 
