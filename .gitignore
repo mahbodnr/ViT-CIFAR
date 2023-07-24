@@ -1,5 +1,3 @@
-nnmf/
-
 *.bash
 *.gv
 *.gv.png
@@ -7,6 +5,7 @@ nnmf/
 .DS_Store
 
 todo.md
+nightly/*
 data/*
 weights/*
 logs/*

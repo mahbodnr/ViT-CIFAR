@@ -348,7 +348,7 @@ class GatedNNMF(nn.Module):
 
             if not train_bases:
                 print("[Warning] SbS style NNMF called without trainable weights")
-                raise Exception("SbS style NNMF called without trainable weights")
+                # raise Exception("SbS style NNMF called without trainable weights")
             if depthwise:
                 raise NotImplementedError
             self.NNMF = NNMFConv2d(
@@ -362,6 +362,8 @@ class GatedNNMF(nn.Module):
                 device=torch.device("cuda"),
                 default_dtype=torch.float32,
                 dilation=(1,1),
+                keep_last_grad_scale = True,
+                disable_scale_grade = False,
             )
         else:
             raise NotImplementedError(f"NNMF type {NNMF_type} not implemented")

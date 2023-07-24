@@ -74,7 +74,7 @@ def get_model(args):
 
         net = AttentionFreeViT(
             mode=aft_models[args.model_name],
-            seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            seq_len=args.seq_len,
             factorize=args.factorize,
             factorization_dimension=args.factorization_dimension,
             in_c=args.in_c,
@@ -96,7 +96,7 @@ def get_model(args):
 
         net = HamburgerAttentionViT(
             burger_mode=args.burger_mode,
-            seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            seq_len=args.seq_len,
             depthwise=args.depthwise,
             in_c=args.in_c,
             num_classes=args.num_classes,
@@ -117,7 +117,7 @@ def get_model(args):
 
         net = HamburgerViT(
             burger_mode=args.burger_mode,
-            seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            seq_len=args.seq_len,
             depthwise=args.depthwise,
             in_c=args.in_c,
             num_classes=args.num_classes,
@@ -137,7 +137,7 @@ def get_model(args):
         nnmf_type = args.model_name.split("_")[1]
         net = GatedNNMFViT(
             NNMF_type=nnmf_type,
-            seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            seq_len=args.seq_len,
             in_c=args.in_c,
             num_classes=args.num_classes,
             img_size=args.size,
@@ -160,7 +160,7 @@ def get_model(args):
         from vit import GatedMLPViT
 
         net = GatedMLPViT(
-            seq_len=args.patch**2 + 1 if args.is_cls_token else args.patch**2,
+            seq_len=args.seq_len,
             in_c=args.in_c,
             num_classes=args.num_classes,
             img_size=args.size,
@@ -284,7 +284,7 @@ def get_dataset(args):
 
 
 def get_experiment_name(args):
-    experiment_name = f"{args.model_name}_{args.dataset}_{args.num_layers}"
+    experiment_name = f"{args.model_name}_{args.dataset}_{args.num_layers}l"
     if not args.query:
         experiment_name += "_nq"
     if not args.use_encoder_mlp:

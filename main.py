@@ -34,7 +34,9 @@ parser.add_argument(
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
 parser.add_argument("--eval-batch-size", default=1024, type=int)
+parser.add_argument("--optimizer", default="adam", type=str)
 parser.add_argument("--lr", default=1e-3, type=float)
+parser.add_argument("--lr-nnmf", default=1e-2, type=float)
 parser.add_argument("--min-lr", default=1e-5, type=float)
 parser.add_argument("--beta1", default=0.9, type=float)
 parser.add_argument("--beta2", default=0.999, type=float)
@@ -111,11 +113,14 @@ parser.add_argument(
     type=str,
     choices=["medium", "high", "highest"],
 )
+parser.add_argument("--log-gradients", action="store_true")
+parser.add_argument("--log-gradients-interval", default=250, type=int)
 parser.add_argument("--no-log-weights", action="store_false", dest="log_weights")
 parser.add_argument("--model-summary-depth", default=-1, type=int)
 parser.add_argument("--tags", default="", type=str, help="Comma separated tags.")
 parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
 parser.add_argument("--project-name", default="Rethinking-Transformers", type=str)
+parser.add_argument("--nnmf_learning_rate_threshold_w", default=1e-3, type=float)
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
@@ -131,7 +136,7 @@ args.num_classes = {
     "c100": 100,
     "svhn": 10,
 }[args.dataset]
-
+args.seq_len = args.patch**2 + 1 if args.is_cls_token else args.patch**2
 
 train_ds, test_ds = get_dataset(args)
 train_dl = torch.utils.data.DataLoader(
@@ -169,6 +174,13 @@ if __name__ == "__main__":
         print("[INFO] Log with CSV")
         logger = pl.loggers.CSVLogger(save_dir="logs", name=experiment_name)
     net = Net(args)
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        filename=experiment_name + "-{epoch:03d}-{val_loss:.2f}",
+        save_top_k=1,
+        verbose=True,
+        monitor="val_loss",
+        mode="min",
+    )
     trainer = pl.Trainer(
         precision=args.precision,
         fast_dev_run=args.dry_run,
@@ -177,11 +189,8 @@ if __name__ == "__main__":
         benchmark=args.benchmark,
         logger=logger,
         max_epochs=args.max_epochs,
+        callbacks=[checkpoint_callback],
         enable_model_summary=False,  # Implemented seperately inside the Trainer
     )
     trainer.fit(model=net, train_dataloaders=train_dl, val_dataloaders=test_dl)
-    if not args.dry_run:
-        model_path = f"weights/{experiment_name}.pth"
-        torch.save(net.state_dict(), model_path)
-        if args._comet_api_key:
-            logger.experiment.log_asset(file_name=experiment_name, file_data=model_path)
+    trainer.save_checkpoint("logs/" + experiment_name + ".ckpt")

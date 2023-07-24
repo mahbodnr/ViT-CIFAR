@@ -23,17 +23,57 @@ class Net(pl.LightningModule):
         if hparams.mixup:
             self.mixup = MixUp(alpha=1.0)
         self.log_image_flag = hparams._comet_api_key is None
+        # If there is any NNMF module in the model
+        self.nnmf_layers = []
+        # add all nnmf modules to nnmf_layers
+        for name, module in self.model.named_modules():
+            if "nnmf" in name.lower():
+                self.nnmf_layers.append(module)
 
     def forward(self, x):
         return self.model(x)
 
     def configure_optimizers(self):
-        self.optimizer = torch.optim.Adam(
-            self.model.parameters(),
-            lr=self.hparams.lr,
-            betas=(self.hparams.beta1, self.hparams.beta2),
-            weight_decay=self.hparams.weight_decay,
-        )
+        if self.hparams.optimizer == "adam":
+            self.optimizer = torch.optim.Adam(
+                self.model.parameters(),
+                lr=self.hparams.lr,
+                betas=(self.hparams.beta1, self.hparams.beta2),
+                weight_decay=self.hparams.weight_decay,
+            )
+        elif self.hparams.optimizer == "sgd":
+            self.optimizer = torch.optim.SGD(
+                self.model.parameters(),
+                lr=self.hparams.lr,
+                momentum=self.hparams.beta1,
+                weight_decay=self.hparams.weight_decay,
+            )
+        elif self.hparams.optimizer == "nnmf-adam":
+            from nnmf.optimizer import Madam
+
+            nnmf_params = []
+            other_params = []
+            for name, param in self.model.named_parameters():
+                if "nnmf" in name.lower():
+                    nnmf_params.append(param)
+                else:
+                    other_params.append(param)
+            print(f"NNMF parameters: {len(nnmf_params)}\nOther parameters: {len(other_params)}")
+            self.optimizer = Madam(
+                params=[
+                    {"params": other_params, "lr": self.hparams.lr},
+                    {
+                        "params": nnmf_params,
+                        "lr": self.hparams.lr_nnmf,
+                        "nnmf": True,
+                        "foreach": False,
+                    },
+                ],
+                betas=(self.hparams.beta1, self.hparams.beta2),
+                weight_decay=self.hparams.weight_decay,
+            )
+        else:
+            raise NotImplementedError(f"Unknown optimizer: {self.hparams.optimizer}")
         self.base_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=self.hparams.max_epochs, eta_min=self.hparams.min_lr
         )
@@ -46,16 +86,25 @@ class Net(pl.LightningModule):
         return [self.optimizer], [self.scheduler]
 
     def on_fit_start(self):
-        summary = pl.utilities.model_summary.ModelSummary(self, max_depth = self.hparams.model_summary_depth)
-        self.logger.experiment.log_asset_data(str(summary), file_name="model_summary.txt")
+        summary = pl.utilities.model_summary.ModelSummary(
+            self, max_depth=self.hparams.model_summary_depth
+        )
+        self.logger.experiment.log_asset_data(
+            str(summary), file_name="model_summary.txt"
+        )
         print(summary)
 
     def on_train_start(self):
-        self.log("trainable_params", float(sum(p.numel() for p in self.model.parameters() if p.requires_grad)))
+        self.log(
+            "trainable_params",
+            float(sum(p.numel() for p in self.model.parameters() if p.requires_grad)),
+        )
         self.log("total_params", float(sum(p.numel() for p in self.model.parameters())))
         # Get tags from hparams
         tags = self.hparams.tags.split(",")
-        self.logger.experiment.add_tags(tags)
+        tags = [tag.strip() for tag in tags]
+        if not (tags[0] == "" and len(tags) == 1):
+            self.logger.experiment.add_tags(tags)
         # Get tags from experiment hyperparameters
         self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
 
@@ -74,7 +123,7 @@ class Net(pl.LightningModule):
                         torch.zeros_like(label),
                         1.0,
                     )
-            out = self.model(img)
+            out = self(img)
             loss = self.criterion(out, label) * lambda_ + self.criterion(
                 out, rand_label
             ) * (1.0 - lambda_)
@@ -92,38 +141,104 @@ class Net(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
-        self.log(
-            "lr",
-            self.optimizer.param_groups[0]["lr"],
-            on_epoch=True,
-        )
+        for i, param_group in enumerate(self.optimizer.param_groups):
+            self.log(f"lr_{i}", param_group["lr"], on_epoch=True)
         # check if there is any nan value in model parameters
         for name, param in self.model.named_parameters():
             if torch.isnan(param).any():
                 raise ValueError(f"[ERROR] {name} has nan value. Training stopped.")
         # log weights and layer outputs
         if self.hparams.log_weights:
-            try:
-                if not self.hparams.dry_run:
-                    # log the output of each layer
-                    layer_outputs = get_layer_outputs(
-                        self.model, self.hparams._sample_input_data
-                    )
-                    for name, output in layer_outputs.items():
+            if not self.hparams.dry_run:
+                # log the output of each layer
+                layer_outputs = get_layer_outputs(
+                    self.model, self.hparams._sample_input_data
+                )
+                for name, output in layer_outputs.items():
+                    try:
                         self.logger.experiment.log_histogram_3d(
-                            output.detach().cpu().numpy(),
+                            output.detach().cpu(),
                             name=name + ".output",
                             epoch=self.current_epoch,
                         )
-                    # log weights
-                    for name, param in self.model.named_parameters():
+                    except IndexError:
+                        # Values closer than 1e-20 to zerro will lead to index error
+                        positive_output = output[output > 0]
+                        pos_min = positive_output.min().item() if positive_output.numel() > 0 else float("inf")
+                        negative_output = output[output < 0]
+                        neg_min = abs(negative_output.max().item()) if negative_output.numel() > 0 else float("inf")
                         self.logger.experiment.log_histogram_3d(
-                            param.detach().cpu().numpy(),
+                            output.detach().cpu(),
+                            name=name + ".output",
+                            epoch=self.current_epoch,
+                            start=min(pos_min, neg_min),
+                        )
+                    except Exception as e:
+                        raise e
+                # log weights
+                for name, param in self.model.named_parameters():
+                    try:
+                        self.logger.experiment.log_histogram_3d(
+                            param.detach().cpu(),
                             name=name,
                             epoch=self.current_epoch,
                         )
-            except Exception as e:
-                print(f"\n[ERROR] Failed to log weights and gradients. {e}")
+                    except IndexError:
+                        # Values closer than 1e-20 to zerro will lead to index error
+                        positive_param = param[param > 0]
+                        pos_min = positive_param.min().item() if positive_param.numel() > 0 else float("inf")
+                        negative_param = param[param < 0]
+                        neg_min = abs(negative_param.max().item()) if negative_param.numel() > 0 else float("inf")
+                        self.logger.experiment.log_histogram_3d(
+                            param.detach().cpu(),
+                            name=name,
+                            epoch=self.current_epoch,
+                            start=min(pos_min, neg_min),
+                        )
+
+    def on_before_optimizer_step(self, optimizer):
+        if self.nnmf_layers:
+            for layer in self.nnmf_layers:
+                if self.trainer.global_step== 0:
+                    layer.after_batch(True)
+                else:
+                    layer.after_batch(False)
+
+                layer.update_pre_care()
+
+        # log gradients once per epoch 
+        if self.hparams.log_gradients and not self.hparams.dry_run:
+            if self.trainer.global_step % self.hparams.log_gradients_interval == 0:
+                for name, param in self.model.named_parameters():
+                    try:
+                        self.logger.experiment.log_histogram_3d(
+                            param.grad.detach().cpu(),
+                            name=name + ".grad",
+                            epoch=self.current_epoch,
+                            step= self.trainer.global_step,
+                        )
+                    except IndexError:
+                        # Values closer than 1e-20 to zerro will lead to index error
+                        positive_grad = param.grad[param.grad > 0]
+                        pos_min = positive_grad.min().item() if positive_grad.numel() > 0 else float("inf")
+                        negative_grad = param.grad[param.grad < 0]
+                        neg_min = abs(negative_grad.max().item()) if negative_grad.numel() > 0 else float("inf")
+                        self.logger.experiment.log_histogram_3d(
+                            param.grad.detach().cpu(),
+                            name=name + ".grad",
+                            epoch=self.current_epoch,
+                            step= self.trainer.global_step,
+                            start=min(pos_min, neg_min),
+                        )
+                    except Exception as e:
+                        raise e
+
+                    self.logger.experiment.log_metric(f"Max {name}.grad", param.grad.detach().cpu().max().item())
+
+    def on_after_optimizer_step(self):
+        if self.nnmf_layers:
+            for layer in self.nnmf_layers:
+                layer.update_post_care(self.hparams.nnmf_learning_rate_threshold_w / layer._number_of_input_neurons)
 
     def validation_step(self, batch, batch_idx):
         img, label = batch
