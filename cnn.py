@@ -6,6 +6,7 @@ from layers import LocalGlobalConvolutionEncoder
 class LocalGlobalCNN(nn.Module):
     def __init__(
         self,
+        weight_gated,
         num_layers,
         in_c,
         num_classes,
@@ -48,6 +49,7 @@ class LocalGlobalCNN(nn.Module):
                     kernel_size=kernel_size,
                     use_cls_token=use_cls_token,
                     mlp_hidden=mlp_hidden,
+                    weight_gated=weight_gated,
                     dropout=dropout,
                     normalization=normalization,
                     use_mlp=use_mlp,
@@ -105,3 +107,40 @@ if __name__ == "__main__":
         save_graph=True,
         directory="imgs",
     )
+
+
+class Autoencoder(nn.Module):
+    def __init__(self, input_size, hidden_size, dropout=0.0):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.encoder = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(hidden_size, input_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
+
+def SparseAutoencoderLoss(autoencoder, input, model_output, l1_regularization=0.5, l1_all_layer_outputs=False):
+    mse_loss = nn.MSELoss()
+    l1_loss = nn.L1Loss()
+    mse = mse_loss(model_output, input)
+    l1 = 0
+    values = input
+    if l1_all_layer_outputs:
+        for layer in autoencoder.children():
+            values = layer(values)
+            l1 += l1_loss(values, torch.zeros_like(values))
+    l1 += l1_loss(model_output, input)
+
+    return mse + l1_regularization * l1

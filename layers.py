@@ -320,8 +320,8 @@ class GatedNNMF(nn.Module):
         ffn_features,
         number_of_iterations,
         train_bases,
-        local_learning, # Only SbS
-        depthwise, # Only ham
+        local_learning,  # Only SbS
+        depthwise,  # Only ham
     ):
         super().__init__()
         assert ffn_features % 2 == 0
@@ -361,9 +361,48 @@ class GatedNNMF(nn.Module):
                 local_learning=local_learning,
                 device=torch.device("cuda"),
                 default_dtype=torch.float32,
-                dilation=(1,1),
-                keep_last_grad_scale = True,
-                disable_scale_grade = False,
+                keep_last_grad_scale=True,
+                disable_scale_grade=False,
+            )
+        elif NNMF_type == "sbsed":
+            # from nnmf.NNMFLayerSbSBP import NNMFEncoderDecoder
+
+            # if not train_bases:
+            #     print("[Warning] SbS style NNMF called without trainable weights")
+            #     # raise Exception("SbS style NNMF called without trainable weights")
+            # if depthwise:
+            #     raise NotImplementedError
+            # self.NNMF = NNMFEncoderDecoder(
+            #     number_of_input_neurons=1,  # input channes
+            #     number_of_neurons=128,  # output channels
+            #     input_size=[seq_len, ffn_features // 2],
+            #     forward_kernel_size=[seq_len, ffn_features // 2],
+            #     number_of_iterations=number_of_iterations,
+            #     w_trainable=train_bases,
+            #     local_learning=local_learning,
+            #     device=torch.device("cuda"),
+            #     default_dtype=torch.float32,
+            #     keep_last_grad_scale = True,
+            #     disable_scale_grade = False,
+            # )
+            from nnmf.AutoNNMFLayer import AutoNNMFLayer
+
+            if not train_bases:
+                print("[Warning] SbS style NNMF called without trainable weights")
+            if depthwise:
+                raise NotImplementedError
+            self.NNMF = AutoNNMFLayer(
+                number_of_input_neurons=1,  # input channes
+                number_of_neurons=128,  # output channels
+                input_size=[seq_len, ffn_features // 2],
+                forward_kernel_size=[seq_len, ffn_features // 2],
+                number_of_iterations=number_of_iterations,
+                w_trainable=train_bases,
+                local_learning=local_learning,
+                device=torch.device("cuda"),
+                default_dtype=torch.float32,
+                keep_last_grad_scale=True,
+                disable_scale_grade=False,
             )
         else:
             raise NotImplementedError(f"NNMF type {NNMF_type} not implemented")
@@ -376,6 +415,9 @@ class GatedNNMF(nn.Module):
             z2 = self.NNMF(z2.unsqueeze(-1)).squeeze(-1)
         elif self.NNMF_type == "sbs":
             z2 = self.NNMF(z2.unsqueeze(1)).squeeze(-2)
+        elif self.NNMF_type == "sbsed":
+            z2 = self.NNMF(z2.unsqueeze(1)).squeeze(1)
+
         x = z1 * z2
         x = self.V(x)
         return x
@@ -453,6 +495,45 @@ class GatedMLPTransformerEncoder(TransformerEncoder):
         self.attention = GatedMLP(seq_len, features, ffn_features)
 
 
+class WeightGatedMLP(nn.Module):
+    def __init__(self, seq_len, features, ffn_features):
+        super().__init__()
+        assert ffn_features % 2 == 0
+        self.features = features
+        self.ffn_features = ffn_features
+        self.U = nn.Linear(features, ffn_features)
+        self.to_weight = nn.Linear(ffn_features // 2, seq_len)
+        self.V = nn.Linear(ffn_features // 2, features)
+        self.activation = nn.GELU()
+        self.norm = nn.LayerNorm([ffn_features // 2])
+
+    def forward(self, x):
+        # x dimension: [batch, seq_len, features]
+        x = self.activation(self.U(x))
+        z1, z2 = torch.chunk(x, 2, dim=-1)  # [batch, seq_len, ffn_features // 2]
+        z2 = self.norm(z2)
+        z2 = self.to_weight(z2)  # [batch, seq_len, seq_len]
+        x = torch.einsum("bij, bjf->bif", z2, z1)  # [batch, seq_len, ffn_features // 2]
+        x = self.V(x)  # [batch, seq_len, features]
+        return x
+
+
+class WeightGatedMLPTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        seq_len: int,
+        features: int,
+        ffn_features: int,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+        use_mlp: bool = True,
+    ):
+        super(WeightGatedMLPTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout, use_mlp
+        )
+        self.attention = WeightGatedMLP(seq_len, features, ffn_features)
+
+
 class LocalGlobalConvolution(nn.Module):
     def __init__(
         self,
@@ -524,6 +605,72 @@ class LocalGlobalConvolution(nn.Module):
         return x
 
 
+class WeightLocalGlobalConvolution(nn.Module):
+    def __init__(
+        self,
+        input_shapes,  # [channels, n_patches, n_patches]
+        hidden_features,
+        kernel_size: int = 1,
+        use_cls_token: bool = True,
+        normalization: str = "batch_norm",
+    ):
+        super().__init__()
+        self.use_cls_token = use_cls_token
+        self.kernel_size = kernel_size
+        self.features = features = input_shapes[0]
+        self.hidden_features = hidden_features
+        input_size = input_shapes[-1] * input_shapes[-2]
+        self.local_conv_in = nn.Conv2d(
+            features, hidden_features, kernel_size=kernel_size, padding="same"
+        )
+        self.local_conv_out = nn.Conv2d(
+            hidden_features // 2, features, kernel_size=kernel_size, padding="same"
+        )
+        if use_cls_token:
+            self.global_transform = nn.Linear(input_size + kernel_size**2, features)
+        else:
+            self.global_transform = nn.Linear(input_size, input_size)
+        self.activation = nn.GELU()
+        if normalization == "layer_norm":
+
+            class Transpose(nn.Module):
+                def forward(self, x):
+                    return x.transpose(1, -1)
+
+            self.norm = nn.Sequential(
+                Transpose(),
+                nn.LayerNorm(hidden_features // 2),
+                Transpose(),
+            )
+        elif normalization == "batch_norm":
+            self.norm = nn.BatchNorm2d(hidden_features // 2)
+
+    def forward(self, x, cls_token):
+        if not self.use_cls_token:
+            raise NotImplementedError
+        assert cls_token is not None, "cls_token is None"
+        # x dimension: [batch, channels (features), n_patches, n_patches]
+        # CLS token dimension: [batch, channels, kernel_size, kernel_size]
+        x = self.activation(self.local_conv_in(x)) # [batch, channels (hidden_features), n_patches, n_patches]
+        cls_token = self.activation(self.local_conv_in(cls_token)) # [batch, channels (hidden_features), kernel_size, kernel_size]
+        x_cls = torch.cat([x.flatten(-2) , cls_token.flatten(-2)], dim=-1) # [batch, channels, n_patches ** 2 + kernel_size ** 2]
+        z1, z2 = torch.chunk(x_cls, 2, dim=1)  # split channels
+        z2 = self.norm(z2)
+        z2 = self.global_transform(z2)  # [batch, channels, channels]
+
+        x_cls = torch.einsum("bij, bjf->bif", z2, z1)
+        x, cls_token = (
+            x_cls[..., : -self.kernel_size**2].reshape(x.shape[0], self.hidden_features//2, *x.shape[2:]),
+            x_cls[..., -self.kernel_size**2 :].reshape(cls_token.shape[0], self.hidden_features//2, *cls_token.shape[2:]),
+        )
+        x = self.local_conv_out(x)
+        cls_token = self.local_conv_out(cls_token)
+
+        if self.use_cls_token:
+            return (x, cls_token)
+        return x
+
+
 class LocalGlobalConvolutionEncoder(nn.Module):
     def __init__(
         self,
@@ -531,6 +678,7 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         hidden_features: int,
         kernel_size: int,
         mlp_hidden: int,
+        weight_gated: bool = False,
         dropout: float = 0.0,
         normalization: str = "batch_norm",
         use_cls_token: bool = True,
@@ -561,13 +709,22 @@ class LocalGlobalConvolutionEncoder(nn.Module):
             self.la2 = nn.BatchNorm2d(features)
         else:
             raise ValueError(f"normalization {normalization} not supported")
-        self.attention = LocalGlobalConvolution(
-            input_shapes=input_shapes,
-            hidden_features=hidden_features,
-            kernel_size=kernel_size,
-            use_cls_token=use_cls_token,
-            normalization=normalization,
-        )
+        if weight_gated:
+            self.attention = WeightLocalGlobalConvolution(
+                input_shapes=input_shapes,
+                hidden_features=hidden_features,
+                kernel_size=kernel_size,
+                use_cls_token=use_cls_token,
+                normalization=normalization,
+            )
+        else:
+            self.attention = LocalGlobalConvolution(
+                input_shapes=input_shapes,
+                hidden_features=hidden_features,
+                kernel_size=kernel_size,
+                use_cls_token=use_cls_token,
+                normalization=normalization,
+            )
         if use_mlp:
             self.mlp = nn.Sequential(
                 nn.Conv2d(
@@ -589,7 +746,7 @@ class LocalGlobalConvolutionEncoder(nn.Module):
             x, cls_token = x
         else:
             raise NotImplementedError(
-                "no CLS token has not been implemented yet"
+                "'no CLS token' has not been implemented yet"
             )  # FIXME
         shortcut_x = x
         shortxut_cls_token = cls_token
@@ -608,6 +765,8 @@ class LocalGlobalConvolutionEncoder(nn.Module):
         if self.use_cls_token:
             return (x, cls_token)
         return x
+
+
 
 
 if __name__ == "__main__":

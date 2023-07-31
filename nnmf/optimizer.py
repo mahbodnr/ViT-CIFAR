@@ -12,6 +12,7 @@ class Madam(optim.Adam):
     def __init__(self, params, lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0, amsgrad=False):
         super(Madam, self).__init__(params, lr, betas, eps, weight_decay, amsgrad)
 
+
     @_use_grad_for_differentiable
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -95,11 +96,11 @@ def madam(params: List[Tensor],
          lr: float,
          weight_decay: float,
          eps: float,
-         maximize: bool):
+         maximize: bool,
+        ):
     r"""
     See :class:`~torch.optim.Adam` for details.
     """
-
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
@@ -142,7 +143,8 @@ def madam(params: List[Tensor],
          capturable=capturable,
          differentiable=differentiable,
          grad_scale=grad_scale,
-         found_inf=found_inf)
+         found_inf=found_inf,
+        )
 
 
 def _single_tensor_madam(params: List[Tensor],
@@ -162,7 +164,8 @@ def _single_tensor_madam(params: List[Tensor],
                         eps: float,
                         maximize: bool,
                         capturable: bool,
-                        differentiable: bool):
+                        differentiable: bool,
+                        ):
 
     assert grad_scale is None and found_inf is None
 

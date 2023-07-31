@@ -27,14 +27,17 @@ parser.add_argument(
         "hamburger_attention",
         "gnnmf_ham",
         "gnnmf_sbs",
+        "gnnmf_sbsed",
         "gmlp",
+        "wgmlp",
         "lgcnn",
+        "wlgcnn",
     ],
 )
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
 parser.add_argument("--eval-batch-size", default=1024, type=int)
-parser.add_argument("--optimizer", default="adam", type=str)
+parser.add_argument("--optimizer", default="adam", type=str, choices=["adam", "sgd", "madam"])
 parser.add_argument("--lr", default=1e-3, type=float)
 parser.add_argument("--lr-nnmf", default=1e-2, type=float)
 parser.add_argument("--min-lr", default=1e-5, type=float)
@@ -70,7 +73,7 @@ parser.add_argument(
     help="Train Matrix Decomposition (MD) bases. If False, generates random bases for each forward pass.",
 )
 parser.add_argument(
-    "--local_learning",
+    "--local-learning",
     action="store_true",
     help="Enables local learning rule for SbS type NNMF instead of error backpropagation.",
 )

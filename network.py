@@ -48,7 +48,7 @@ class Net(pl.LightningModule):
                 momentum=self.hparams.beta1,
                 weight_decay=self.hparams.weight_decay,
             )
-        elif self.hparams.optimizer == "nnmf-adam":
+        elif self.hparams.optimizer == "madam":
             from nnmf.optimizer import Madam
 
             nnmf_params = []
@@ -210,6 +210,8 @@ class Net(pl.LightningModule):
         if self.hparams.log_gradients and not self.hparams.dry_run:
             if self.trainer.global_step % self.hparams.log_gradients_interval == 0:
                 for name, param in self.model.named_parameters():
+                    if param.grad is None:
+                        continue
                     try:
                         self.logger.experiment.log_histogram_3d(
                             param.grad.detach().cpu(),

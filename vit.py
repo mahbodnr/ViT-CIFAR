@@ -9,6 +9,7 @@ from layers import (
     HamburgerTransformerEncoder,
     GatedNNMFTransformerEncoder,
     GatedMLPTransformerEncoder,
+    WeightGatedMLPTransformerEncoder,
 )
 
 
@@ -348,6 +349,54 @@ class GatedMLPViT(ViT):
         if not pos_emb:
             self.pos_emb = torch.zeros_like(self.pos_emb, requires_grad=False)
 
+
+class WeightGatedMLPViT(ViT):
+    def __init__(
+        self,
+        seq_len: int,
+        in_c: int = 3,
+        num_classes: int = 10,
+        img_size: int = 224,
+        patch: int = 16,
+        dropout: float = 0.0,
+        num_layers: int = 12,
+        hidden: int = 768,
+        ffn_features: int = 3072,
+        depthwise: bool = True,
+        encoder_mlp: bool = True,
+        mlp_hidden: int = 768 * 4,
+        head: int = 1,
+        is_cls_token: bool = True,
+        pos_emb: bool = True,
+    ):
+        super(WeightGatedMLPViT, self).__init__(
+            in_c,
+            num_classes,
+            img_size,
+            patch,
+            dropout,
+            num_layers,
+            hidden,
+            encoder_mlp,
+            mlp_hidden,
+            head,
+            is_cls_token,
+        )
+        self.enc = nn.Sequential(
+            *[
+                WeightGatedMLPTransformerEncoder(
+                    seq_len=seq_len,
+                    features=hidden,
+                    ffn_features=ffn_features,
+                    use_mlp=encoder_mlp,
+                    mlp_hidden=mlp_hidden,
+                    dropout=dropout,
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        if not pos_emb:
+            self.pos_emb = torch.zeros_like(self.pos_emb, requires_grad=False)
 
 if __name__ == "__main__":
     from torchview import draw_graph

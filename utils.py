@@ -176,10 +176,50 @@ def get_model(args):
             pos_emb=args.pos_emb,
         )
 
+    elif args.model_name == "wgmlp":
+        from vit import WeightGatedMLPViT
+
+        net = WeightGatedMLPViT(
+            seq_len=args.seq_len,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            img_size=args.size,
+            patch=args.patch,
+            dropout=args.dropout,
+            num_layers=args.num_layers,
+            hidden=args.hidden,
+            ffn_features=args.ffn_features,
+            encoder_mlp=args.use_encoder_mlp,
+            mlp_hidden=args.mlp_hidden,
+            head=args.head,
+            is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
+        )
+        
     elif args.model_name == "lgcnn":
         from cnn import LocalGlobalCNN
 
         net = LocalGlobalCNN(
+        weight_gated=False,
+        num_layers= args.num_layers,
+        in_c=args.in_c,
+        num_classes=args.num_classes,
+        n_channels=args.hidden, # Number of channels in CNN model is equivalent to the hidden embedding size in ViT
+        hidden_features=args.ffn_features, # Number of hidden features in CNN model is equivalent to the ffn features in GMLP
+        img_size=args.size,
+        patch=args.patch,
+        kernel_size=args.kernel_size,
+        use_cls_token=args.is_cls_token,
+        mlp_hidden=args.mlp_hidden,
+        dropout=args.dropout,
+        normalization=args.cnn_normalization,
+        use_mlp=args.use_encoder_mlp,
+    )
+    elif args.model_name == "wlgcnn":
+        from cnn import LocalGlobalCNN
+
+        net = LocalGlobalCNN(
+        weight_gated=True,
         num_layers= args.num_layers,
         in_c=args.in_c,
         num_classes=args.num_classes,

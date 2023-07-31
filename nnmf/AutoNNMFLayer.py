@@ -2,10 +2,7 @@ import torch
 from .utils import calculate_output_size
 
 
-import comet_ml
-
-
-class NNMFConv2d(torch.nn.Module):
+class AutoNNMFLayer(torch.nn.Module):
     _epsilon_0: float
     _weights: torch.nn.parameter.Parameter
     _weights_exists: bool = False
@@ -14,6 +11,7 @@ class NNMFConv2d(torch.nn.Module):
     _dilation: list[int]
     _padding: list[int]
     _output_size: torch.Tensor
+    _inbetween_size: torch.Tensor
     _number_of_neurons: int
     _number_of_input_neurons: int
     _h_initial: torch.Tensor | None = None
@@ -93,8 +91,9 @@ class NNMFConv2d(torch.nn.Module):
 
         assert len(input_size) == 2
         self._input_size = input_size
+        self._output_size = torch.tensor(input_size)
 
-        self._output_size = calculate_output_size(
+        self._inbetween_size = calculate_output_size(
             value=input_size,
             kernel_size=self._kernel_size,
             stride=self._stride,
@@ -127,7 +126,7 @@ class NNMFConv2d(torch.nn.Module):
         )
         self.weights = weights
 
-        self.nnmf_functional_bp = NNMFFunctionalBP.apply
+        self.functional_nnmf_sbs_bp = FunctionalAutoNNMF.apply
 
     @property
     def weights(self) -> torch.Tensor | None:
@@ -186,10 +185,10 @@ class NNMFConv2d(torch.nn.Module):
 
     def after_batch(self, new_state: bool = False):
         if self._keep_last_grad_scale is True:
-            self._last_grad_scale.data = self._last_grad_scale.grad
+            self._last_grad_scale.data = self._last_grad_scale.grad  # type: ignore
             self._keep_last_grad_scale = new_state
 
-        self._last_grad_scale.grad = torch.zeros_like(self._last_grad_scale.grad)
+        self._last_grad_scale.grad = torch.zeros_like(self._last_grad_scale.grad)  # type: ignore
 
     def set_h_init_to_uniform(self) -> None:
         assert self._number_of_neurons > 2
@@ -257,7 +256,7 @@ class NNMFConv2d(torch.nn.Module):
                 padding=(int(self._padding[0]), int(self._padding[1])),
                 stride=(int(self._stride[0]), int(self._stride[1])),
             ),
-            output_size=tuple(self._output_size.tolist()),
+            output_size=tuple(self._inbetween_size.tolist()),
             kernel_size=(1, 1),
             dilation=(1, 1),
             padding=(0, 0),
@@ -278,8 +277,8 @@ class NNMFConv2d(torch.nn.Module):
 
         parameter_list = torch.tensor(
             [
-                int(self._output_size[0]),  # 0
-                int(self._output_size[1]),  # 1
+                int(self._inbetween_size[0]),  # 0
+                int(self._inbetween_size[1]),  # 1
                 int(self._number_of_iterations),  # 2
                 int(self._w_trainable),  # 3
                 int(self._skip_gradient_calculation),  # 4
@@ -293,7 +292,7 @@ class NNMFConv2d(torch.nn.Module):
 
         epsilon_0 = torch.tensor(self._epsilon_0)
 
-        h = self.nnmf_functional_bp(
+        h = self.functional_nnmf_sbs_bp(
             input_convolved,
             epsilon_0,
             self._weights,
@@ -306,10 +305,31 @@ class NNMFConv2d(torch.nn.Module):
             h.shape[0] * h.shape[-2] * h.shape[-1]
         )
 
-        return h
+        # The decoding weight will not be optimized!!!
+        # (self._weights.detach().clone())
+        output_convolved = (
+            h.unsqueeze(1) * (self._weights.detach().clone()).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+        ).sum(dim=2)
+
+        output = torch.nn.functional.fold(
+            torch.nn.functional.unfold(
+                output_convolved,
+                kernel_size=(1, 1),
+                dilation=1,
+                padding=0,
+                stride=1,
+            ),
+            output_size=(int(input.shape[-2]), int(input.shape[-1])),
+            kernel_size=(int(self._kernel_size[0]), int(self._kernel_size[1])),
+            dilation=(int(self._dilation[0]), int(self._dilation[1])),
+            padding=(int(self._padding[0]), int(self._padding[1])),
+            stride=(int(self._stride[0]), int(self._stride[1])),
+        )
+
+        return output
 
 
-class NNMFFunctionalBP(torch.autograd.Function):
+class FunctionalAutoNNMF(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore
         ctx,
@@ -336,10 +356,6 @@ class NNMFFunctionalBP(torch.autograd.Function):
             ],
         )
 
-        # print(h.shape)
-        # print(weights.shape)
-        # print(input.shape)
-
         for _ in range(0, number_of_iterations):
             h_w = h.unsqueeze(1) * weights.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
             h_w = h_w / (h_w.sum(dim=2, keepdim=True) + 1e-20)
@@ -358,7 +374,7 @@ class NNMFFunctionalBP(torch.autograd.Function):
             grad_output_scale,
         )
 
-        return torch.clamp(h, min=-10, max=10)
+        return h
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -372,12 +388,6 @@ class NNMFFunctionalBP(torch.autograd.Function):
             parameter_list,
             last_grad_scale,
         ) = ctx.saved_tensors
-
-        experiment = comet_ml.config.get_global_experiment()
-
-        if experiment is not None:
-            experiment.log_metric("init max grad_output", grad_output.max().item())
-            experiment.log_metric("init mean grad_output", grad_output.mean().item())
 
         # ##############################################
         # Default output
@@ -482,34 +492,6 @@ class NNMFFunctionalBP(torch.autograd.Function):
         del backprop_bigr
         del backprop_r
 
-        # #################################################
-        # DEBUG
-        # #################################################
-
-        if experiment is not None:
-            experiment.log_metric("max grad_input", grad_input.max().item())
-            experiment.log_metric("mean grad_input", grad_input.mean().item())
-            experiment.log_metric("max grad_output", grad_output.max().item())
-            experiment.log_metric("mean grad_output", grad_output.mean().item())
-            experiment.log_metric("max grad_weights", grad_weights.max().item())
-            experiment.log_metric("mean grad_weights", grad_weights.mean().item())
-            experiment.log_metric("grad_output_scale", grad_output_scale.item())
-            experiment.log_metric("last_grad_scale", last_grad_scale.item())
-
-        # #################################################
-        # clamp the gradients
-        # #################################################
-
-        if grad_input is not None:
-            grad_input = torch.clamp(grad_input, min=-5, max=5)
-        if grad_weights is not None:
-            grad_weights = torch.clamp(grad_weights, min=-5, max=5)
-        if experiment is not None:
-            experiment.log_metric("max grad_input clamp", grad_input.max().item())
-            experiment.log_metric("mean grad_input clamp", grad_input.mean().item())
-            experiment.log_metric("max grad_weights clamp", grad_weights.max().item())
-            experiment.log_metric("mean grad_weights clamp", grad_weights.mean().item())
-
         return (
             grad_input,
             grad_epsilon_0,
@@ -518,63 +500,3 @@ class NNMFFunctionalBP(torch.autograd.Function):
             grad_parameter_list,
             grad_output_scale,
         )
-
-
-class NNMFEncoderDecoder(NNMFConv2d):
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # encoder:
-        h = super().forward(input)
-        # decoder:
-        if self._input_size != self._kernel_size:
-            decoder_weight = (
-                self.weights.detach()
-                .clone()
-                .reshape(
-                    self._number_of_input_neurons,
-                    self._kernel_size[0],
-                    self._kernel_size[1],
-                    self._number_of_neurons,
-                )
-            ).permute(3, 0, 1, 2)
-            h = torch.nn.functional.conv_transpose2d(
-                h,
-                decoder_weight,
-                stride=self._stride,
-                padding=self._padding,
-                dilation=self._dilation,
-            )
-        else:
-            decoder_weight = self.weights.detach().clone()
-            h = h.squeeze(-1).squeeze(-1) @ decoder_weight.T
-            h = h.reshape_as(input)
-
-        return h
-
-
-
-
-if __name__ == "__main__":
-    nnmfencoderdecoder = NNMFEncoderDecoder(
-        number_of_input_neurons=1,
-        number_of_neurons=128,
-        input_size=[65, 300],
-        forward_kernel_size=[65, 300],
-        number_of_iterations=2,
-        epsilon_0=0.0,
-        weight_noise_range=[0.0, 1.0],
-        strides=[1, 1],
-        dilation=[1, 1],
-        padding=[0, 0],
-        w_trainable=True,
-        device=torch.device("cpu"),
-        default_dtype=torch.float32,
-        layer_id=0,
-        local_learning=False,
-        output_layer=False,
-        skip_gradient_calculation=False,
-        keep_last_grad_scale=False,
-        disable_scale_grade=True,
-    )
-    input = torch.rand((256, 1, 65, 300), dtype=torch.float32)
-    output = nnmfencoderdecoder(input)
-    print(output.shape)
