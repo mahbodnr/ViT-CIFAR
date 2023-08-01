@@ -17,7 +17,7 @@ class Net(pl.LightningModule):
         super(Net, self).__init__()
         self.hparams.update(vars(hparams))
         self.save_hyperparameters()
-        self.model = get_model(hparams)
+        self.model, self.model_can_learn_unsupervised = get_model(hparams)
         self.criterion = get_criterion(hparams)
         if hparams.cutmix:
             self.cutmix = CutMix(hparams.size, beta=1.0)
@@ -103,9 +103,10 @@ class Net(pl.LightningModule):
         summary = pl.utilities.model_summary.ModelSummary(
             self, max_depth=self.hparams.model_summary_depth
         )
-        self.logger.experiment.log_asset_data(
-            str(summary), file_name="model_summary.txt"
-        )
+        if hasattr(self.logger.experiment, "log_asset_data"):
+            self.logger.experiment.log_asset_data(
+                str(summary), file_name="model_summary.txt"
+            )
         print(summary)
 
     def on_train_start(self):
@@ -120,10 +121,10 @@ class Net(pl.LightningModule):
         if not (tags[0] == "" and len(tags) == 1):
             self.logger.experiment.add_tags(tags)
         # Get tags from experiment hyperparameters
-        self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
+        if hasattr(self.logger.experiment, "add_tags"):
+            self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
 
-    def training_step(self, batch, batch_idx):
-        img, label = batch
+    def supervised_step(self, img, label):
         if self.hparams.cutmix or self.hparams.mixup:
             if self.hparams.cutmix:
                 img, label, rand_label, lambda_ = self.cutmix((img, label))
@@ -145,6 +146,25 @@ class Net(pl.LightningModule):
         else:
             out = self(img)
             loss = self.calculate_loss(out, label)
+        return out, loss
+
+    def unsupervised_step(self, unlabeled_batch):
+        pass
+
+
+    def training_step(self, batch, batch_idx):
+        if self.hparams.semi_supervised:
+            labeled_batch, unlabeled_batch = batch["labeled"], batch["unlabeled"]
+            img, label = labeled_batch
+            if self.model_can_learn_unsupervised:
+                self.unsupervised_step(unlabeled_batch)
+                out, loss = self.supervised_step(img, label)
+            else:
+                out, loss = self.supervised_step(img, label)
+        else:
+            img, label = batch
+            out, loss = self.supervised_step(img, label)
+
 
         if not self.log_image_flag and not self.hparams.dry_run:
             self.log_image_flag = True

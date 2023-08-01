@@ -851,10 +851,11 @@ class AEAttention(nn.Module):
         # elementwise multiplication
         # dist =  (AE_preds * z2.unsqueeze(1)).sum(dim=-1)
         # cosine similarity
-        cos = nn.CosineSimilarity(dim=-1)
-        dist = cos(AE_preds, z2.unsqueeze(1))
+        # cos = nn.CosineSimilarity(dim=-1)
+        # dist = cos(AE_preds, z2.unsqueeze(1))
         # KL divergence #TODO
-
+        # baseline
+        dist =  AE_preds.sum(dim=-1)
         # multiply by the original z2 and sum along dim=1 to get the attention map
         attn_map = F.softmax(dist, dim= -1).detach() # [batch, seq_len, seq_len] #TODO add without softmax
         if self.save_attn_map:

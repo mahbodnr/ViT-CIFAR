@@ -1,6 +1,5 @@
 import torch
 
-
 def attention_rollout(attn_mat, head_dim= None):
     # check if the input is a torch tensor
     if not isinstance(attn_mat, torch.Tensor):
@@ -8,12 +7,12 @@ def attention_rollout(attn_mat, head_dim= None):
 
     if head_dim is not None:
         # Average the attention weights across all heads.
-        att_mat = torch.mean(att_mat, dim=head_dim)
+        attn_mat = torch.mean(att_mat, dim=head_dim)
 
     # To account for residual connections, we add an identity matrix to the
     # attention matrix and re-normalize the weights.
-    residual_att = torch.eye(att_mat.size(-1))
-    aug_att_mat = att_mat + residual_att
+    residual_att = torch.eye(attn_mat.size(-1))
+    aug_att_mat = attn_mat + residual_att
     aug_att_mat = aug_att_mat / aug_att_mat.sum(dim=-1).unsqueeze(-1)
 
     # Recursively multiply the weight matrices

@@ -6,7 +6,7 @@ import torch
 import pytorch_lightning as pl
 import numpy as np
 
-from utils import get_dataset, get_experiment_name
+from utils import get_dataloader, get_experiment_name
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -36,6 +36,7 @@ parser.add_argument(
         "ae_baseline",
     ],
 )
+parser.add_argument("--semi-supervised", action="store_true")
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
 parser.add_argument("--eval-batch-size", default=1024, type=int)
@@ -129,7 +130,12 @@ parser.add_argument("--project-name", default="Rethinking-Transformers", type=st
 parser.add_argument("--nnmf_learning_rate_threshold_w", default=1e-3, type=float)
 parser.add_argument("--aece_l1_regularization", default=0.5, type=float, help="L1 regularization for AutoencoderCrossEntropyLoss")
 parser.add_argument("--aece_l1_outputs", action="store_true", help="L1 regularization for all layer outputs in AutoencoderCrossEntropyLoss")
+parser.add_argument("--no-pin-memory", action="store_false", dest="pin_memory")
+parser.add_argument("--no-shuffle", action="store_false", dest="shuffle")
+parser.add_argument("--allow-download", action="store_true", dest="download_data")
 args = parser.parse_args()
+
+# args.semi_supervised = True #DELETE THIS LINE!!
 
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
@@ -146,24 +152,15 @@ args.num_classes = {
 }[args.dataset]
 args.seq_len = args.patch**2 + 1 if args.is_cls_token else args.patch**2
 
-train_ds, test_ds = get_dataset(args)
-train_dl = torch.utils.data.DataLoader(
-    train_ds,
-    batch_size=args.batch_size,
-    shuffle=True,
-    num_workers=args.num_workers,
-    pin_memory=True,
-)
-args._sample_input_data = next(iter(train_dl))[0][0:10].to(
-    "cuda" if args.gpus else "cpu"
-)
-test_dl = torch.utils.data.DataLoader(
-    test_ds,
-    batch_size=args.eval_batch_size,
-    num_workers=args.num_workers,
-    pin_memory=True,
-)
-
+train_dl, test_dl = get_dataloader(args)
+if args.semi_supervised:
+    args._sample_input_data = next(iter(train_dl))["unlabeled"][0][0:10].to(
+        "cuda" if args.gpus else "cpu"
+    )
+else:
+    args._sample_input_data = next(iter(train_dl))[0][0:10].to(
+        "cuda" if args.gpus else "cpu"
+    )
 
 if __name__ == "__main__":
     pprint({k: v for k, v in vars(args).items() if not k.startswith("_")})

@@ -1,6 +1,8 @@
 import torch.nn as nn
+from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
+from lightning.pytorch.utilities import CombinedLoader
 
 from autoaugment import CIFAR10Policy, SVHNPolicy
 from criterions import LabelSmoothingCrossEntropyLoss, AutoencoderCrossEntropyLoss
@@ -50,7 +52,7 @@ def get_criterion(args):
         criterion = AutoencoderCrossEntropyLoss(
             args.aece_l1_regularization, args.aece_l1_outputs
         )
-        
+
     else:
         raise ValueError(f"{args.criterion}?")
 
@@ -58,6 +60,7 @@ def get_criterion(args):
 
 
 def get_model(args):
+    can_learn_unsupervised = False # It can not do unsupervised learning... until it can.
     if args.model_name == "vit":
         from vit import ViT
 
@@ -139,6 +142,7 @@ def get_model(args):
         )
     elif args.model_name.startswith("gnnmf"):
         from vit import GatedNNMFViT
+
         nnmf_type = args.model_name.split("_")[1]
         net = GatedNNMFViT(
             NNMF_type=nnmf_type,
@@ -200,45 +204,45 @@ def get_model(args):
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
         )
-        
+
     elif args.model_name == "lgcnn":
         from cnn import LocalGlobalCNN
 
         net = LocalGlobalCNN(
-        weight_gated=False,
-        num_layers= args.num_layers,
-        in_c=args.in_c,
-        num_classes=args.num_classes,
-        n_channels=args.hidden, # Number of channels in CNN model is equivalent to the hidden embedding size in ViT
-        hidden_features=args.ffn_features, # Number of hidden features in CNN model is equivalent to the ffn features in GMLP
-        img_size=args.size,
-        patch=args.patch,
-        kernel_size=args.kernel_size,
-        use_cls_token=args.is_cls_token,
-        mlp_hidden=args.mlp_hidden,
-        dropout=args.dropout,
-        normalization=args.cnn_normalization,
-        use_mlp=args.use_encoder_mlp,
-    )
+            weight_gated=False,
+            num_layers=args.num_layers,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            n_channels=args.hidden,  # Number of channels in CNN model is equivalent to the hidden embedding size in ViT
+            hidden_features=args.ffn_features,  # Number of hidden features in CNN model is equivalent to the ffn features in GMLP
+            img_size=args.size,
+            patch=args.patch,
+            kernel_size=args.kernel_size,
+            use_cls_token=args.is_cls_token,
+            mlp_hidden=args.mlp_hidden,
+            dropout=args.dropout,
+            normalization=args.cnn_normalization,
+            use_mlp=args.use_encoder_mlp,
+        )
     elif args.model_name == "wlgcnn":
         from cnn import LocalGlobalCNN
 
         net = LocalGlobalCNN(
-        weight_gated=True,
-        num_layers= args.num_layers,
-        in_c=args.in_c,
-        num_classes=args.num_classes,
-        n_channels=args.hidden, # Number of channels in CNN model is equivalent to the hidden embedding size in ViT
-        hidden_features=args.ffn_features, # Number of hidden features in CNN model is equivalent to the ffn features in GMLP
-        img_size=args.size,
-        patch=args.patch,
-        kernel_size=args.kernel_size,
-        use_cls_token=args.is_cls_token,
-        mlp_hidden=args.mlp_hidden,
-        dropout=args.dropout,
-        normalization=args.cnn_normalization,
-        use_mlp=args.use_encoder_mlp,
-    )
+            weight_gated=True,
+            num_layers=args.num_layers,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            n_channels=args.hidden,  # Number of channels in CNN model is equivalent to the hidden embedding size in ViT
+            hidden_features=args.ffn_features,  # Number of hidden features in CNN model is equivalent to the ffn features in GMLP
+            img_size=args.size,
+            patch=args.patch,
+            kernel_size=args.kernel_size,
+            use_cls_token=args.is_cls_token,
+            mlp_hidden=args.mlp_hidden,
+            dropout=args.dropout,
+            normalization=args.cnn_normalization,
+            use_mlp=args.use_encoder_mlp,
+        )
     elif args.model_name == "ae":
         from vit import AEViT
 
@@ -260,7 +264,7 @@ def get_model(args):
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
         )
-
+        can_learn_unsupervised = True
     elif args.model_name == "ae_baseline":
         from vit import BaselineAEViT
 
@@ -286,7 +290,7 @@ def get_model(args):
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 
-    return net
+    return net, can_learn_unsupervised
 
 
 def get_transform(args):
@@ -322,54 +326,159 @@ def get_transform(args):
     return train_transform, test_transform
 
 
-def get_dataset(args):
+def get_dataloader(args):
     root = "data"
-    if args.dataset == "c10":
-        args.in_c = 3
-        args.num_classes = 10
-        args.size = 32
-        args.padding = 4
-        args.mean, args.std = [0.4914, 0.4822, 0.4465], [0.2470, 0.2435, 0.2616]
-        train_transform, test_transform = get_transform(args)
-        train_ds = torchvision.datasets.CIFAR10(
-            root, train=True, transform=train_transform, download=True
-        )
-        test_ds = torchvision.datasets.CIFAR10(
-            root, train=False, transform=test_transform, download=True
-        )
+    if args.semi_supervised:
+        if args.dataset == "c10":
+            from datasets import CIFAR10SS
 
-    elif args.dataset == "c100":
-        args.in_c = 3
-        args.num_classes = 100
-        args.size = 32
-        args.padding = 4
-        args.mean, args.std = [0.5071, 0.4867, 0.4408], [0.2675, 0.2565, 0.2761]
-        train_transform, test_transform = get_transform(args)
-        train_ds = torchvision.datasets.CIFAR100(
-            root, train=True, transform=train_transform, download=True
-        )
-        test_ds = torchvision.datasets.CIFAR100(
-            root, train=False, transform=test_transform, download=True
-        )
+            args.in_c = 3
+            args.num_classes = 10
+            args.size = 32
+            args.padding = 4
+            args.mean, args.std = [0.4914, 0.4822, 0.4465], [0.2470, 0.2435, 0.2616]
+            train_transforms, test_transforms = get_transform(args)
+            labeled_set = CIFAR10SS(
+                root=root,
+                split="label",
+                download=args.download_data,
+                transform=train_transforms,
+                boundary=0,
+            )
+            unlabeled_set = CIFAR10SS(
+                root=root,
+                split="unlabel",
+                download=args.download_data,
+                transform=train_transforms,
+                boundary=0,
+            )
+            test_set = CIFAR10SS(
+                root=root,
+                split="test",
+                download=args.download_data,
+                transform=test_transforms,
+                boundary=0,
+            )
 
-    elif args.dataset == "svhn":
-        args.in_c = 3
-        args.num_classes = 10
-        args.size = 32
-        args.padding = 4
-        args.mean, args.std = [0.4377, 0.4438, 0.4728], [0.1980, 0.2010, 0.1970]
-        train_transform, test_transform = get_transform(args)
-        train_ds = torchvision.datasets.SVHN(
-            root, split="train", transform=train_transform, download=True
+        elif args.dataset == "c100":
+            raise NotImplementedError(
+                "CIFAR100 is not implemented yet for semi-supervised."
+            )
+
+        elif args.dataset == "svhn":
+            raise NotImplementedError(
+                "SVHN is not implemented yet for semi-supervised."
+            )
+
+        else:
+            raise NotImplementedError(
+                f"{args.dataset} is not implemented yet for semi-supervised."
+            )
+
+        train_dl = CombinedLoader(
+            {
+                "labeled": DataLoader(
+                    labeled_set,
+                    batch_size=args.batch_size,
+                    shuffle=args.shuffle,
+                    num_workers=args.num_workers,
+                    pin_memory=args.pin_memory,
+                ),
+                "unlabeled": DataLoader(
+                    unlabeled_set,
+                    batch_size=args.batch_size,
+                    shuffle=args.shuffle,
+                    num_workers=args.num_workers,
+                    pin_memory=args.pin_memory,
+                ),
+            }
         )
-        test_ds = torchvision.datasets.SVHN(
-            root, split="test", transform=test_transform, download=True
+        test_dl = DataLoader(
+            test_set,
+            batch_size=args.eval_batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
         )
 
     else:
-        raise NotImplementedError(f"{args.dataset} is not implemented yet.")
+        if args.dataset == "c10":
+            args.in_c = 3
+            args.num_classes = 10
+            args.size = 32
+            args.padding = 4
+            args.mean, args.std = [0.4914, 0.4822, 0.4465], [0.2470, 0.2435, 0.2616]
+            train_transform, test_transform = get_transform(args)
+            train_ds = torchvision.datasets.CIFAR10(
+                root,
+                train=True,
+                transform=train_transform,
+                download=args.download_data,
+            )
+            test_ds = torchvision.datasets.CIFAR10(
+                root,
+                train=False,
+                transform=test_transform,
+                download=args.download_data,
+            )
 
-    return train_ds, test_ds
+        elif args.dataset == "c100":
+            args.in_c = 3
+            args.num_classes = 100
+            args.size = 32
+            args.padding = 4
+            args.mean, args.std = [0.5071, 0.4867, 0.4408], [0.2675, 0.2565, 0.2761]
+            train_transform, test_transform = get_transform(args)
+            train_ds = torchvision.datasets.CIFAR100(
+                root,
+                train=True,
+                transform=train_transform,
+                download=args.download_data,
+            )
+            test_ds = torchvision.datasets.CIFAR100(
+                root,
+                train=False,
+                transform=test_transform,
+                download=args.download_data,
+            )
+
+        elif args.dataset == "svhn":
+            args.in_c = 3
+            args.num_classes = 10
+            args.size = 32
+            args.padding = 4
+            args.mean, args.std = [0.4377, 0.4438, 0.4728], [0.1980, 0.2010, 0.1970]
+            train_transform, test_transform = get_transform(args)
+            train_ds = torchvision.datasets.SVHN(
+                root,
+                split="train",
+                transform=train_transform,
+                download=args.download_data,
+            )
+            test_ds = torchvision.datasets.SVHN(
+                root,
+                split="test",
+                transform=test_transform,
+                download=args.download_data,
+            )
+
+        else:
+            raise NotImplementedError(f"{args.dataset} is not implemented yet.")
+
+        train_dl = DataLoader(
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=args.shuffle,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
+        )
+        test_dl = DataLoader(
+            test_ds,
+            batch_size=args.eval_batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
+        )
+
+    return train_dl, test_dl
 
 
 def get_experiment_name(args):
@@ -391,6 +500,7 @@ def get_experiment_name(args):
     if not args.is_cls_token:
         experiment_name += "_gap"
     return experiment_name
+
 
 def get_experiment_tags(args):
     tags = [args.model_name]
