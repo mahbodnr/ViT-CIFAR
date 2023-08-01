@@ -16,10 +16,11 @@ class TransformerEncoder(nn.Module):
         head: int = 8,
         dropout: float = 0.0,
         use_mlp: bool = True,
+        save_attn_map: bool = False,
     ):
         super(TransformerEncoder, self).__init__()
         self.la1 = nn.LayerNorm(features)
-        self.attention = MultiHeadSelfAttention(features, head=head, dropout=dropout)
+        self.attention = MultiHeadSelfAttention(features, head=head, dropout=dropout, save_attn_map=save_attn_map)
         self.la2 = nn.LayerNorm(features)
         if use_mlp:
             self.mlp = nn.Sequential(
@@ -32,6 +33,7 @@ class TransformerEncoder(nn.Module):
             )
         else:
             self.mlp = None
+        self._save_attn_map = save_attn_map
 
     def forward(self, x):
         out = self.attention(self.la1(x)) + x
@@ -39,9 +41,23 @@ class TransformerEncoder(nn.Module):
             out = self.mlp(self.la2(out)) + out
         return out
 
+    @property
+    def save_attn_map(self):
+        return self._save_attn_map
+
+    @save_attn_map.setter
+    def save_attn_map(self, value):
+        self._save_attn_map = value
+        self.attention.save_attn_map = value
+
+    def get_attention_map(self):
+        if self._save_attn_map:
+            return self.attention.attn_map
+        else:
+            raise Exception("Attention map was not saved. Set save_attn_map=True when initializing the model.")
 
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, features: int, head: int = 8, dropout: float = 0.0):
+    def __init__(self, features: int, head: int = 8, dropout: float = 0.0, save_attn_map: bool = False):
         super(MultiHeadSelfAttention, self).__init__()
         self.head = head
         self.features = features
@@ -54,6 +70,8 @@ class MultiHeadSelfAttention(nn.Module):
         self.out_project = nn.Linear(features, features)
         self.dropout = nn.Dropout(dropout)
 
+        self.save_attn_map = save_attn_map
+
     def forward(self, x):
         B, T, _ = x.size()  # (#Batches, #Inputs, #Features)
         Q = self.Wq(x).view(B, T, self.head, self.features // self.head).transpose(1, 2)
@@ -63,6 +81,8 @@ class MultiHeadSelfAttention(nn.Module):
         attn_map = F.softmax(
             torch.einsum("bhif, bhjf->bhij", Q, K) / self.sqrt_d, dim=-1
         )  # (b,h,n,n)
+        if self.save_attn_map:
+            self.attn_map = attn_map
         attn = torch.einsum("bhij, bhjf->bihf", attn_map, V)  # (b,n,h,f//h)
         output = self.dropout(self.out_project(attn.flatten(2)))
         return output
@@ -792,7 +812,7 @@ class Autoencoder(nn.Module):
 
 
 class AEAttention(nn.Module):
-    def __init__(self, seq_len, features, ffn_features, AE_hidden):
+    def __init__(self, seq_len, features, ffn_features, AE_hidden, save_attn_map=False):
         super().__init__()
         assert ffn_features % 2 == 0
         self.features = features
@@ -807,6 +827,8 @@ class AEAttention(nn.Module):
         self.AE_input = None
         self.AE_hidden = None
         self.AE_output = None
+        # save attention map
+        self.save_attn_map = save_attn_map
 
     def forward(self, x):
         # x dimension: [batch, seq_len, features]
@@ -835,6 +857,8 @@ class AEAttention(nn.Module):
 
         # multiply by the original z2 and sum along dim=1 to get the attention map
         attn_map = F.softmax(dist, dim= -1).detach() # [batch, seq_len, seq_len] #TODO add without softmax
+        if self.save_attn_map:
+            self.attn_map = attn_map.detach().clone()
         attn = torch.einsum("bij, bjf->bif", attn_map, z1)  # [batch, seq_len, ffn_features // 2]
         x = self.V(attn)  # [batch, seq_len, features]
         return x
@@ -849,9 +873,10 @@ class AEAttentionTransformerEncoder(TransformerEncoder):
         mlp_hidden: int,
         dropout: float = 0.0,
         use_mlp: bool = True,
+        save_attn_map: bool = False,
     ):
         super(AEAttentionTransformerEncoder, self).__init__(
-            features, mlp_hidden, 1, dropout, use_mlp
+            features, mlp_hidden, 1, dropout, use_mlp, save_attn_map
         )
         self.attention = AEAttention(seq_len, features, ffn_features, AE_hidden)
 
