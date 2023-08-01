@@ -32,6 +32,8 @@ parser.add_argument(
         "wgmlp",
         "lgcnn",
         "wlgcnn",
+        "ae",
+        "ae_baseline",
     ],
 )
 parser.add_argument("--patch", default=8, type=int)
@@ -50,7 +52,7 @@ parser.add_argument("--weight-decay", default=5e-5, type=float)
 parser.add_argument("--warmup-epoch", default=5, type=int)
 parser.add_argument("--precision", default="16-mixed", type=str)
 parser.add_argument("--autoaugment", action="store_true")
-parser.add_argument("--criterion", default="ce")
+parser.add_argument("--criterion", default="ce", type=str, choices=["ce", "aece"])
 parser.add_argument("--label-smoothing", action="store_true")
 parser.add_argument("--smoothing", default=0.1, type=float)
 parser.add_argument("--rcpaste", action="store_true")
@@ -101,6 +103,7 @@ parser.add_argument(
     type=int,
     help="Kernel size in Local-Global CNN model. Kernel-size=1 is similar to linear layers in ViT.",
 )
+parser.add_argument("--ae-hidden", default=128, type=int, help="Autoencoder hidden size.")
 parser.add_argument("--cnn-normalization", default="layer_norm", type=str)
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--no-query", action="store_false", dest="query")
@@ -124,6 +127,8 @@ parser.add_argument("--tags", default="", type=str, help="Comma separated tags."
 parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
 parser.add_argument("--project-name", default="Rethinking-Transformers", type=str)
 parser.add_argument("--nnmf_learning_rate_threshold_w", default=1e-3, type=float)
+parser.add_argument("--aece_l1_regularization", default=0.5, type=float, help="L1 regularization for AutoencoderCrossEntropyLoss")
+parser.add_argument("--aece_l1_outputs", action="store_true", help="L1 regularization for all layer outputs in AutoencoderCrossEntropyLoss")
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)

@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from hamburger import get_hamburger
-import argparse
 
+import argparse
 from typing import Optional, Tuple, List
 
 
@@ -766,7 +766,146 @@ class LocalGlobalConvolutionEncoder(nn.Module):
             return (x, cls_token)
         return x
 
+class Autoencoder(nn.Module):
+    def __init__(self, input_size, hidden_size, dropout=0.0):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.encoder = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(hidden_size, input_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+        self.hidden_activity = None
 
+    def forward(self, x):
+        x = self.encoder(x)
+        self.hidden_activity = x.clone()
+        x = self.decoder(x)
+        return x
+
+
+class AEAttention(nn.Module):
+    def __init__(self, seq_len, features, ffn_features, AE_hidden):
+        super().__init__()
+        assert ffn_features % 2 == 0
+        self.features = features
+        self.ffn_features = ffn_features
+        self.U = nn.Linear(features, ffn_features)
+        self.AE = Autoencoder(ffn_features // 2, AE_hidden)
+        self.V = nn.Linear(ffn_features // 2, features)
+        self.activation = nn.GELU()
+        self.norm1 = nn.LayerNorm([ffn_features // 2])
+        self.norm2 = nn.LayerNorm([ffn_features // 2])
+        # save the input and output of the autoencoder in each forward pass
+        self.AE_input = None
+        self.AE_hidden = None
+        self.AE_output = None
+
+    def forward(self, x):
+        # x dimension: [batch, seq_len, features]
+        x = self.activation(self.U(x))
+        z1, z2 = torch.chunk(x, 2, dim=-1)  # [batch, seq_len, ffn_features // 2]
+        # detach z2 from the graph
+        z2 = z2.detach()
+        z2 = self.norm1(z2)
+        # Do a forward pass for the autoencoder with full unmasked data and save the input and output
+        self.AE_input = z2.clone()
+        self.AE_output = self.AE(z2)
+        self.AE_hidden = self.AE.hidden_activity.clone()
+        # repeat z2, 'seq_len' times along dim=1
+        z2_mask = z2.unsqueeze(1).repeat(1, z2.shape[1], 1, 1) # [batch, seq_len, seq_len, ffn_features // 2]
+        # for each value in dim=1, keep one value in dim=2 and set the rest to 0
+        z2_mask = torch.eye(z2.shape[1]).unsqueeze(-1).to(z2.device) * z2_mask
+        # pass the result through AE
+        AE_preds = self.norm2(self.AE(z2_mask)) # [batch, seq_len, seq_len, ffn_features // 2]
+        # calculate distance between the original z2 and the AE predictions
+        # elementwise multiplication
+        # dist =  (AE_preds * z2.unsqueeze(1)).sum(dim=-1)
+        # cosine similarity
+        cos = nn.CosineSimilarity(dim=-1)
+        dist = cos(AE_preds, z2.unsqueeze(1))
+        # KL divergence #TODO
+
+        # multiply by the original z2 and sum along dim=1 to get the attention map
+        attn_map = F.softmax(dist, dim= -1).detach() # [batch, seq_len, seq_len] #TODO add without softmax
+        attn = torch.einsum("bij, bjf->bif", attn_map, z1)  # [batch, seq_len, ffn_features // 2]
+        x = self.V(attn)  # [batch, seq_len, features]
+        return x
+
+class AEAttentionTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        seq_len: int,
+        features: int,
+        ffn_features: int,
+        AE_hidden: int,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+        use_mlp: bool = True,
+    ):
+        super(AEAttentionTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout, use_mlp
+        )
+        self.attention = AEAttention(seq_len, features, ffn_features, AE_hidden)
+
+class BaselineAEAttention(nn.Module):
+    def __init__(self, seq_len, features, ffn_features, AE_hidden):
+        super().__init__()
+        assert ffn_features % 2 == 0
+        self.features = features
+        self.ffn_features = ffn_features
+        self.U = nn.Linear(features, ffn_features)
+        self.AE = Autoencoder(ffn_features // 2, AE_hidden)
+        self.V = nn.Linear(ffn_features // 2, features)
+        self.activation = nn.GELU()
+        self.norm1 = nn.LayerNorm([ffn_features // 2])
+        self.norm2 = nn.LayerNorm([ffn_features // 2])
+
+    def forward(self, x):
+        # x dimension: [batch, seq_len, features]
+        x = self.activation(self.U(x))
+        z1, z2 = torch.chunk(x, 2, dim=-1)  # [batch, seq_len, ffn_features // 2]
+        z2 = self.norm1(z2)
+        # repeat z2, 'seq_len' times along dim=1
+        z2_mask = z2.unsqueeze(1).repeat(1, z2.shape[1], 1, 1) # [batch, seq_len, seq_len, ffn_features // 2]
+        # for each value in dim=1, keep one value in dim=2 and set the rest to 0
+        z2_mask = torch.eye(z2.shape[1]).unsqueeze(-1).to(z2.device) * z2_mask
+        # pass the result through AE
+        AE_preds = self.norm2(self.AE(z2_mask)) # [batch, seq_len, seq_len, ffn_features // 2]
+        # calculate distance between the original z2 and the AE predictions
+        # elementwise multiplication
+        dist = (AE_preds * z2.unsqueeze(1)).sum(dim=-1)
+
+
+        # multiply by the original z2 and sum along dim=1 to get the attention map
+        attn_map = F.softmax(dist, dim= -1) # [batch, seq_len, seq_len] #TODO add without softmax
+        attn = torch.einsum("bij, bjf->bif", attn_map, z1)  # [batch, seq_len, ffn_features // 2]
+        x = self.V(attn)  # [batch, seq_len, features]
+        return x
+
+class BaselineAEAttentionTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        seq_len: int,
+        features: int,
+        ffn_features: int,
+        AE_hidden: int,
+        mlp_hidden: int,
+        mask: bool,
+        dropout: float = 0.0,
+        use_mlp: bool = True,
+    ):
+        super(BaselineAEAttentionTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout, use_mlp
+        )
+        self.attention = BaselineAEAttention(seq_len, features, ffn_features, AE_hidden)
 
 
 if __name__ == "__main__":

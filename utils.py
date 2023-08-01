@@ -3,7 +3,7 @@ import torchvision
 import torchvision.transforms as transforms
 
 from autoaugment import CIFAR10Policy, SVHNPolicy
-from criterions import LabelSmoothingCrossEntropyLoss
+from criterions import LabelSmoothingCrossEntropyLoss, AutoencoderCrossEntropyLoss
 from da import RandomCropPaste
 
 aft_models = {
@@ -46,6 +46,11 @@ def get_criterion(args):
             )
         else:
             criterion = nn.CrossEntropyLoss()
+    elif args.criterion == "aece":
+        criterion = AutoencoderCrossEntropyLoss(
+            args.aece_l1_regularization, args.aece_l1_outputs
+        )
+        
     else:
         raise ValueError(f"{args.criterion}?")
 
@@ -234,6 +239,50 @@ def get_model(args):
         normalization=args.cnn_normalization,
         use_mlp=args.use_encoder_mlp,
     )
+    elif args.model_name == "ae":
+        from vit import AEViT
+
+        net = AEViT(
+            seq_len=args.seq_len,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            img_size=args.size,
+            patch=args.patch,
+            dropout=args.dropout,
+            num_layers=args.num_layers,
+            hidden=args.hidden,
+            ffn_features=args.ffn_features,
+            AE_hidden=args.ae_hidden,
+            depthwise=args.depthwise,
+            encoder_mlp=args.use_encoder_mlp,
+            mlp_hidden=args.mlp_hidden,
+            head=args.head,
+            is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
+        )
+
+    elif args.model_name == "ae_baseline":
+        from vit import BaselineAEViT
+
+        net = BaselineAEViT(
+            seq_len=args.seq_len,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            img_size=args.size,
+            patch=args.patch,
+            dropout=args.dropout,
+            num_layers=args.num_layers,
+            hidden=args.hidden,
+            ffn_features=args.ffn_features,
+            AE_hidden=args.ae_hidden,
+            depthwise=args.depthwise,
+            encoder_mlp=args.use_encoder_mlp,
+            mlp_hidden=args.mlp_hidden,
+            head=args.head,
+            is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
+        )
+
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 
