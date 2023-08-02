@@ -287,6 +287,25 @@ def get_model(args):
             pos_emb=args.pos_emb,
         )
 
+    elif args.model_name == "linear":
+        from vit import LinearAttentionViT
+
+        net = LinearAttentionViT(
+            seq_len=args.seq_len,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            img_size=args.size,
+            patch=args.patch,
+            dropout=args.dropout,
+            num_layers=args.num_layers,
+            hidden=args.hidden,
+            ffn_features=args.ffn_features,
+            encoder_mlp=args.use_encoder_mlp,
+            mlp_hidden=args.mlp_hidden,
+            head=args.head,
+            is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
+        )
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 

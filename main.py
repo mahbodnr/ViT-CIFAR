@@ -34,6 +34,7 @@ parser.add_argument(
         "wlgcnn",
         "ae",
         "ae_baseline",
+        "linear"
     ],
 )
 parser.add_argument("--semi-supervised", action="store_true")

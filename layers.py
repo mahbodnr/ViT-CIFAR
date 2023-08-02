@@ -818,7 +818,7 @@ class AEAttention(nn.Module):
         self.features = features
         self.ffn_features = ffn_features
         self.U = nn.Linear(features, ffn_features)
-        self.AE = Autoencoder(ffn_features // 2, AE_hidden)
+        self.AE = Autoencoder(seq_len, AE_hidden)
         self.V = nn.Linear(ffn_features // 2, features)
         self.activation = nn.GELU()
         self.norm1 = nn.LayerNorm([ffn_features // 2])
@@ -838,25 +838,18 @@ class AEAttention(nn.Module):
         z2 = z2.detach()
         z2 = self.norm1(z2)
         # Do a forward pass for the autoencoder with full unmasked data and save the input and output
-        self.AE_input = z2.clone()
-        self.AE_output = self.AE(z2)
+        self.AE_input = z2.transpose(-2, -1).clone() # [batch, ffn_features // 2, seq_len]
+        self.AE_output = self.AE(z2.transpose(-2, -1))
         self.AE_hidden = self.AE.hidden_activity.clone()
         # repeat z2, 'seq_len' times along dim=1
         z2_mask = z2.unsqueeze(1).repeat(1, z2.shape[1], 1, 1) # [batch, seq_len, seq_len, ffn_features // 2]
         # for each value in dim=1, keep one value in dim=2 and set the rest to 0
         z2_mask = torch.eye(z2.shape[1]).unsqueeze(-1).to(z2.device) * z2_mask
         # pass the result through AE
-        AE_preds = self.norm2(self.AE(z2_mask)) # [batch, seq_len, seq_len, ffn_features // 2]
+        AE_preds = self.AE(z2_mask.transpose(-2, -1)).transpose(-2, -1) # [batch, seq_len, seq_len, ffn_features // 2]
         # calculate distance between the original z2 and the AE predictions
         # elementwise multiplication
-        # dist =  (AE_preds * z2.unsqueeze(1)).sum(dim=-1)
-        # cosine similarity
-        # cos = nn.CosineSimilarity(dim=-1)
-        # dist = cos(AE_preds, z2.unsqueeze(1))
-        # KL divergence #TODO
-        # baseline
-        dist =  AE_preds.sum(dim=-1)
-        # multiply by the original z2 and sum along dim=1 to get the attention map
+        dist =  (AE_preds * z2.unsqueeze(1)).sum(dim=-1)
         attn_map = F.softmax(dist, dim= -1).detach() # [batch, seq_len, seq_len] #TODO add without softmax
         if self.save_attn_map:
             self.attn_map = attn_map.detach().clone()
@@ -933,6 +926,41 @@ class BaselineAEAttentionTransformerEncoder(TransformerEncoder):
         )
         self.attention = BaselineAEAttention(seq_len, features, ffn_features, AE_hidden)
 
+class LinearAttention(nn.Module):
+    def __init__(self, seq_len, features, ffn_features):
+        super().__init__()
+        assert ffn_features % 2 == 0
+        self.features = features
+        self.ffn_features = ffn_features
+        self.U = nn.Linear(features, ffn_features)
+        self.to_weight = nn.Linear(ffn_features // 2, seq_len)
+        self.V = nn.Linear(ffn_features // 2, features)
+        self.activation = nn.GELU()
+        self.norm = nn.LayerNorm([ffn_features // 2])
+
+    def forward(self, x):
+        x = self.activation(self.U(x))
+        z1, z2 = torch.chunk(x, 2, dim=-1)
+        z2 = self.norm(z2)
+        z2 = self.to_weight(z2)  # [batch, seq_len, seq_len]
+        x = torch.einsum("bij, bjf->bif", z2, z1)  # [batch, seq_len, ffn_features // 2]
+        x = self.V(x)
+        return x
+
+class LinearAttentionTransformerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        seq_len: int,
+        features: int,
+        ffn_features: int,
+        mlp_hidden: int,
+        dropout: float = 0.0,
+        use_mlp: bool = True,
+    ):
+        super(LinearAttentionTransformerEncoder, self).__init__(
+            features, mlp_hidden, 1, dropout, use_mlp
+        )
+        self.attention = LinearAttention(seq_len, features, ffn_features)
 
 if __name__ == "__main__":
     from torchview import draw_graph
