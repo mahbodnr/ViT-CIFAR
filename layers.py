@@ -686,9 +686,7 @@ class WeightLocalGlobalConvolution(nn.Module):
         x = self.local_conv_out(x)
         cls_token = self.local_conv_out(cls_token)
 
-        if self.use_cls_token:
-            return (x, cls_token)
-        return x
+        return x, cls_token
 
 
 class LocalGlobalConvolutionEncoder(nn.Module):
@@ -810,7 +808,7 @@ class Autoencoder(nn.Module):
         x = self.decoder(x)
         return x
 
-
+"""
 class AEAttention(nn.Module):
     def __init__(self, seq_len, features, ffn_features, AE_hidden, save_attn_map=False):
         super().__init__()
@@ -829,6 +827,8 @@ class AEAttention(nn.Module):
         self.AE_output = None
         # save attention map
         self.save_attn_map = save_attn_map
+        
+        self.AE_optimizer = torch.optim.Adam(self.AE.parameters(), lr=0.001)
 
     def forward(self, x):
         # x dimension: [batch, seq_len, features]
@@ -850,12 +850,95 @@ class AEAttention(nn.Module):
         # calculate distance between the original z2 and the AE predictions
         # elementwise multiplication
         dist =  (AE_preds * z2.unsqueeze(1)).sum(dim=-1)
+        # dist = AE_preds.sum(dim=-1)
         attn_map = F.softmax(dist, dim= -1).detach() # [batch, seq_len, seq_len] #TODO add without softmax
         if self.save_attn_map:
-            self.attn_map = attn_map.detach().clone()
+            self.attn_map = attn_map.clone()
         attn = torch.einsum("bij, bjf->bif", attn_map, z1)  # [batch, seq_len, ffn_features // 2]
         x = self.V(attn)  # [batch, seq_len, features]
         return x
+
+    def unsupervised_update(self):
+        assert self.AE_input is not None
+
+        AE_input = self.AE_input.detach()
+        AE_preds = self.AE(AE_input)  
+        # calculate the loss
+        loss = F.mse_loss(AE_preds, AE_input)
+        # zero the gradients
+        self.AE_optimizer.zero_grad()
+        # calculate the gradients
+        loss.backward()
+        # update the weights
+        self.AE_optimizer.step()
+
+        return loss.item()
+"""
+
+
+class AEAttention(nn.Module):
+    def __init__(self, seq_len, features, ffn_features, AE_hidden, save_attn_map=False):
+        super().__init__()
+        assert ffn_features % 2 == 0
+        self.features = features
+        self.ffn_features = ffn_features
+        self.U = nn.Linear(features, ffn_features)
+        self.AE = Autoencoder(seq_len, AE_hidden)
+        self.V = nn.Linear(ffn_features, features)
+        self.activation = nn.GELU()
+        self.norm1 = nn.LayerNorm([ffn_features])
+        self.norm2 = nn.LayerNorm([ffn_features])
+        # save the input and output of the autoencoder in each forward pass
+        self.AE_input = None
+        self.AE_hidden = None
+        self.AE_output = None
+        # save attention map
+        self.save_attn_map = save_attn_map
+        
+        self.AE_optimizer = torch.optim.Adam(self.AE.parameters(), lr=0.001)
+
+    def forward(self, x):
+        # x dimension: [batch, seq_len, features]
+        x = self.activation(self.U(x))
+        # detach z2 from the graph
+        z = x.detach()
+        z = self.norm1(z)
+        # Do a forward pass for the autoencoder with full unmasked data and save the input and output
+        self.AE_input = z.transpose(-2, -1).clone() # [batch, ffn_features // 2, seq_len]
+        self.AE_output = self.AE(z.transpose(-2, -1))
+        self.AE_hidden = self.AE.hidden_activity.clone()
+        # repeat z2, 'seq_len' times along dim=1
+        z_mask = z.unsqueeze(1).repeat(1, z.shape[1], 1, 1) # [batch, seq_len, seq_len, ffn_features // 2]
+        # for each value in dim=1, keep one value in dim=2 and set the rest to 0
+        z_mask = torch.eye(z.shape[1]).unsqueeze(-1).to(z.device) * z_mask
+        # pass the result through AE
+        AE_preds = self.AE(z_mask.transpose(-2, -1)).transpose(-2, -1) # [batch, seq_len, seq_len, ffn_features // 2]
+        # calculate distance between the original z2 and the AE predictions
+        # elementwise multiplication
+        dist =  (AE_preds * z.unsqueeze(1)).sum(dim=-1)
+        # dist = AE_preds.sum(dim=-1)
+        attn_map = F.softmax(dist, dim= -1).detach() # [batch, seq_len, seq_len] #TODO add without softmax
+        if self.save_attn_map:
+            self.attn_map = attn_map.clone()
+        attn = torch.einsum("bij, bjf->bif", attn_map, x)  # [batch, seq_len, ffn_features // 2]
+        x = self.V(attn)  # [batch, seq_len, features]
+        return x
+
+    def unsupervised_update(self):
+        assert self.AE_input is not None
+
+        AE_input = self.AE_input.detach().requires_grad_(True)
+        AE_preds = self.AE(AE_input)  
+        # calculate the loss
+        loss = F.mse_loss(AE_preds, AE_input)
+        # zero the gradients
+        self.AE_optimizer.zero_grad()
+        # calculate the gradients
+        loss.backward()
+        # update the weights
+        self.AE_optimizer.step()
+
+        return loss.item()
 
 class AEAttentionTransformerEncoder(TransformerEncoder):
     def __init__(
@@ -933,7 +1016,8 @@ class LinearAttention(nn.Module):
         self.features = features
         self.ffn_features = ffn_features
         self.U = nn.Linear(features, ffn_features)
-        self.to_weight = nn.Linear(ffn_features // 2, seq_len)
+        self.to_weight1 = nn.Linear(ffn_features // 2, seq_len)
+        self.to_weight2 = nn.Linear(seq_len, seq_len)
         self.V = nn.Linear(ffn_features // 2, features)
         self.activation = nn.GELU()
         self.norm = nn.LayerNorm([ffn_features // 2])
@@ -942,7 +1026,8 @@ class LinearAttention(nn.Module):
         x = self.activation(self.U(x))
         z1, z2 = torch.chunk(x, 2, dim=-1)
         z2 = self.norm(z2)
-        z2 = self.to_weight(z2)  # [batch, seq_len, seq_len]
+        z2 = F.relu(self.to_weight1(z2))  # [batch, seq_len, seq_len]
+        z2 = self.to_weight2(z2)  # [batch, seq_len, seq_len]
         x = torch.einsum("bij, bjf->bif", z2, z1)  # [batch, seq_len, ffn_features // 2]
         x = self.V(x)
         return x
@@ -962,6 +1047,49 @@ class LinearAttentionTransformerEncoder(TransformerEncoder):
         )
         self.attention = LinearAttention(seq_len, features, ffn_features)
 
+
+class ANN(nn.Module):
+    def __init__(self, layers, dropout=0.0, batchnorm=False, activation=nn.ReLU()):
+        super(ANN, self).__init__()
+        self.blocks = nn.ModuleList()
+        for feature_idx in range(len(layers) - 1):
+            self.blocks.append(nn.Linear(layers[feature_idx], layers[feature_idx + 1]))
+            if batchnorm:
+                self.blocks.append(nn.BatchNorm1d(layers[feature_idx + 1]))
+            self.blocks.append(activation)
+            if dropout:
+                self.blocks.append(nn.Dropout(dropout))
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return x
+
+
+class CNN(nn.Module):
+    def __init__(self, features, kernel_size= 3, batchnorm=True, activation=nn.ReLU(), pooling=True):
+        super(CNN, self).__init__()
+        self.features = features
+        self.blocks = nn.ModuleList()
+        if isinstance(kernel_size, int):
+            kernel_size = [kernel_size] * (len(features) - 1)
+        assert len(kernel_size) == len(features) - 1
+        for feature_idx in range(len(features) - 1):
+            self.blocks.append(
+                nn.Conv2d(features[feature_idx], features[feature_idx + 1], kernel_size=kernel_size[feature_idx])
+            )
+            if batchnorm:
+                self.blocks.append(nn.BatchNorm2d(features[feature_idx + 1]))
+            self.blocks.append(activation)
+            if pooling:
+                self.blocks.append(nn.MaxPool2d(2, 2))
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return x
+
+    
 if __name__ == "__main__":
     from torchview import draw_graph
 

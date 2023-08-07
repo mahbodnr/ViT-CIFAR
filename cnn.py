@@ -1,6 +1,32 @@
 import torch
 import torch.nn as nn
-from layers import LocalGlobalConvolutionEncoder
+from layers import LocalGlobalConvolutionEncoder, ANN, CNN
+
+
+class BaselineCNN(nn.Module):
+    def __init__(
+        self,
+        input_shape,
+        cnn_features=[64, 128, 256],
+        ann_layers=[1024, 256, 64, 10],
+    ):
+        super(ClassifierBase, self).__init__()
+        self.conv = CNN([input_shape[0]] + cnn_features)
+        self.ann = ANN(
+            [
+                calculate_last_layer_size(
+                    input_shape,
+                    cnn_features,
+                )
+            ]
+            + ann_layers
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.reshape(x.shape[0], -1)
+        x = self.ann(x)
+        return x
 
 
 class LocalGlobalCNN(nn.Module):

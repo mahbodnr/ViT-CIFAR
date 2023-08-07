@@ -461,6 +461,11 @@ class AEViT(ViT):
     def AE_hidden(self):
         return [attn.attention.AE_hidden for attn in self.enc]
 
+    def unsupervised_update(self):
+        total_loss = 0
+        for attn in self.enc:
+            total_loss += attn.attention.unsupervised_update()
+        return total_loss
 
 class BaselineAEViT(ViT):
     def __init__(

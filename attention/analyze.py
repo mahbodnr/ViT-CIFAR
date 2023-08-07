@@ -5,11 +5,12 @@ from network import Net
 from argparse import Namespace
 from utils import get_dataloader
 from layers import TransformerEncoder
-from attention import attention_rollout
+from attention import get_joint_attentions
 
-model_name = "ae"
+model_name = "vit"
+n_layers = 3
 # PATH= "logs/vit_c10/version_0/checkpoints/epoch=27-step=10948.ckpt"
-PATH = f"logs/{model_name}_c10_3l_aa.ckpt"
+PATH = f"logs/{model_name}_c10_{n_layers}l_aa.ckpt"
 # Load model
 print("Loading model")
 trained_model = torch.load(PATH)
@@ -20,6 +21,7 @@ args.semi_supervised = False #DELETE later
 args.download_data = False #DELETE later
 args.shuffle = False #DELETE later
 args.pin_memory = False #DELETE later
+args.unsupervised_steps = 0 #DELETE later
 model = Net(args)
 model.load_state_dict(trained_model["state_dict"])
 model.eval()
@@ -42,8 +44,7 @@ for module in model.modules():
     if isinstance(module, TransformerEncoder):
         attn_maps.append(module.get_attention_map())
 
-print("attention layers:", len(attn_maps))
-joint_attention= attention_rollout(attn_maps, head_dim=1 if model_name == "vit" else None)
-for m in joint_attention:
-    plt.imshow(m[0,1:].reshape(8,8))
-    plt.show()
+attention_maps = torch.stack(attn_maps).cpu()
+# print("attention layers:", len(attn_maps))
+# joint_attentions= attention_rollout(attn_maps, Token= None)
+# print("joint attention shape:", joint_attention.shape)

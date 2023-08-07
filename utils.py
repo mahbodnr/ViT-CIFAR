@@ -306,6 +306,16 @@ def get_model(args):
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
         )
+
+    elif args.model_name == "cnn_baseline":
+        from cnn import BaselineCNN
+
+        net = BaselineCNN(
+            input_shape= (3, 32, 32),
+            cnn_features=[32],
+            ann_layers=[1024, 10],
+        )
+        
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 

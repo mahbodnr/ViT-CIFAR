@@ -11,13 +11,19 @@ from vit import ViT, AEViT
 from cnn import LocalGlobalCNN
 from criterions import AutoencoderCrossEntropyLoss
 
-
 class Net(pl.LightningModule):
     def __init__(self, hparams):
         super(Net, self).__init__()
         self.hparams.update(vars(hparams))
         self.save_hyperparameters()
         self.model, self.model_can_learn_unsupervised = get_model(hparams)
+        if (
+            not self.model_can_learn_unsupervised
+            and self.hparams.unsupervised_steps > 0
+        ):
+            print(
+                "[WARNING] Unsuperivsed steps is set to more than 0 but the model cannot learn unsupervised. Unsupervised steps will be ignored."
+            )
         self.criterion = get_criterion(hparams)
         if hparams.cutmix:
             self.cutmix = CutMix(hparams.size, beta=1.0)
@@ -146,11 +152,21 @@ class Net(pl.LightningModule):
         else:
             out = self(img)
             loss = self.calculate_loss(out, label)
+
+        if self.model_can_learn_unsupervised:
+            unsupervised_loss = 0
+            for _ in range(self.hparams.unsupervised_steps):
+                unsupervised_loss += self.model.unsupervised_update()
+            self.log("unsupervised_loss", unsupervised_loss)
+            
+            # Do one more forward pass with the new autoencoder parameters
+            out = self(img)
+            loss = self.calculate_loss(out, label)
+
         return out, loss
 
     def unsupervised_step(self, unlabeled_batch):
         pass
-
 
     def training_step(self, batch, batch_idx):
         if self.hparams.semi_supervised:
@@ -165,7 +181,6 @@ class Net(pl.LightningModule):
             img, label = batch
             out, loss = self.supervised_step(img, label)
 
-
         if not self.log_image_flag and not self.hparams.dry_run:
             self.log_image_flag = True
             self._log_image(img.clone().detach().cpu())
@@ -173,6 +188,17 @@ class Net(pl.LightningModule):
         acc = torch.eq(out.argmax(-1), label).float().mean()
         self.log("loss", loss)
         self.log("acc", acc)
+
+        # DELETE later
+        # if batch_idx == 0:
+        #     self.log(
+        #         "AE input mean", self.model.enc[0].attention.AE_input.mean()
+        #     )
+        #     self.log(
+        #         "AE input std", self.model.enc[0].attention.AE_input.std()
+        #     )
+
+
         return loss
 
     def on_train_epoch_end(self):
@@ -258,45 +284,49 @@ class Net(pl.LightningModule):
                 layer.update_pre_care()
 
         # log gradients once per epoch
-        if self.hparams.log_gradients and not self.hparams.dry_run:
-            if self.trainer.global_step % self.hparams.log_gradients_interval == 0:
-                for name, param in self.model.named_parameters():
-                    if param.grad is None:
-                        continue
-                    try:
-                        self.logger.experiment.log_histogram_3d(
-                            param.grad.detach().cpu(),
-                            name=name + ".grad",
-                            epoch=self.current_epoch,
-                            step=self.trainer.global_step,
-                        )
-                    except IndexError:
-                        # Values closer than 1e-20 to zerro will lead to index error
-                        positive_grad = param.grad[param.grad > 0]
-                        pos_min = (
-                            positive_grad.min().item()
-                            if positive_grad.numel() > 0
-                            else float("inf")
-                        )
-                        negative_grad = param.grad[param.grad < 0]
-                        neg_min = (
-                            abs(negative_grad.max().item())
-                            if negative_grad.numel() > 0
-                            else float("inf")
-                        )
-                        self.logger.experiment.log_histogram_3d(
-                            param.grad.detach().cpu(),
-                            name=name + ".grad",
-                            epoch=self.current_epoch,
-                            step=self.trainer.global_step,
-                            start=min(pos_min, neg_min),
-                        )
-                    except Exception as e:
-                        raise e
-
-                    self.logger.experiment.log_metric(
-                        f"Max {name}.grad", param.grad.detach().cpu().max().item()
+        if (
+            self.hparams.log_gradients
+            and hasattr(self.logger.experiment, "log_histogram_3d")
+            and not self.hparams.dry_run
+            and self.trainer.global_step % self.hparams.log_gradients_interval == 0
+        ):
+            for name, param in self.model.named_parameters():
+                if param.grad is None:
+                    continue
+                try:
+                    self.logger.experiment.log_histogram_3d(
+                        param.grad.detach().cpu(),
+                        name=name + ".grad",
+                        epoch=self.current_epoch,
+                        step=self.trainer.global_step,
                     )
+                except IndexError:
+                    # Values closer than 1e-20 to zerro will lead to index error
+                    positive_grad = param.grad[param.grad > 0]
+                    pos_min = (
+                        positive_grad.min().item()
+                        if positive_grad.numel() > 0
+                        else float("inf")
+                    )
+                    negative_grad = param.grad[param.grad < 0]
+                    neg_min = (
+                        abs(negative_grad.max().item())
+                        if negative_grad.numel() > 0
+                        else float("inf")
+                    )
+                    self.logger.experiment.log_histogram_3d(
+                        param.grad.detach().cpu(),
+                        name=name + ".grad",
+                        epoch=self.current_epoch,
+                        step=self.trainer.global_step,
+                        start=min(pos_min, neg_min),
+                    )
+                except Exception as e:
+                    raise e
+
+                # self.logger.experiment.log_metric(
+                #     f"Max {name}.grad", param.grad.detach().cpu().max().item()
+                # )
 
     def on_after_optimizer_step(self):
         if self.nnmf_layers:
