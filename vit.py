@@ -405,6 +405,7 @@ class WeightGatedMLPViT(ViT):
 class AEViT(ViT):
     def __init__(
         self,
+        AE_type: str,
         seq_len: int,
         in_c: int = 3,
         num_classes: int = 10,
@@ -414,7 +415,10 @@ class AEViT(ViT):
         num_layers: int = 12,
         hidden: int = 768,
         ffn_features: int = 3072,
-        AE_hidden: int = 128,
+        AE_hidden_features: int = 64,
+        AE_hidden_seq_len: int = 8,
+        order_2d: str = "sfsf",
+        heads: int = 1,
         depthwise: bool = True,
         encoder_mlp: bool = True,
         mlp_hidden: int = 768 * 4,
@@ -438,10 +442,14 @@ class AEViT(ViT):
         self.enc = nn.Sequential(
             *[
                 AEAttentionTransformerEncoder(
+                    AE_type=AE_type,
                     seq_len=seq_len,
                     features=hidden,
-                    AE_hidden=AE_hidden,
+                    AE_hidden_features=AE_hidden_features,
+                    AE_hidden_seq_len=AE_hidden_seq_len,
                     ffn_features=ffn_features,
+                    order_2d=order_2d,
+                    heads=head,
                     use_mlp=encoder_mlp,
                     mlp_hidden=mlp_hidden,
                     dropout=dropout,

@@ -144,8 +144,8 @@ class Net(pl.LightningModule):
                         torch.zeros_like(label),
                         1.0,
                     )
-            out = self(img)
 
+            out = self(img)
             loss = (self.calculate_loss(out, label) * lambda_) + (
                 self.calculate_loss(out, rand_label) * (1.0 - lambda_)
             )
@@ -157,11 +157,13 @@ class Net(pl.LightningModule):
             unsupervised_loss = 0
             for _ in range(self.hparams.unsupervised_steps):
                 unsupervised_loss += self.model.unsupervised_update()
+                # with torch.no_grad():
+                #     out = self(img)
             self.log("unsupervised_loss", unsupervised_loss)
             
             # Do one more forward pass with the new autoencoder parameters
-            out = self(img)
-            loss = self.calculate_loss(out, label)
+            # out = self(img)
+            # loss = self.calculate_loss(out, label)
 
         return out, loss
 
@@ -272,6 +274,38 @@ class Net(pl.LightningModule):
                             epoch=self.current_epoch,
                             start=min(pos_min, neg_min),
                         )
+                # log AE input
+                for module in self.model.modules():
+                    if hasattr(module, "AE_input"):
+                        try:
+                            self.logger.experiment.log_histogram_3d(
+                                module.AE_input.detach().cpu(),
+                                name=module.__class__.__name__ + ".AE_input",
+                                epoch=self.current_epoch,
+                            )
+                        except IndexError:
+                            # Values closer than 1e-20 to zerro will lead to index error
+                            positive_input = module.AE_input[module.AE_input > 0]
+                            pos_min = (
+                                positive_input.min().item()
+                                if positive_input.numel() > 0
+                                else float("inf")
+                            )
+                            negative_input = module.AE_input[module.AE_input < 0]
+                            neg_min = (
+                                abs(negative_input.max().item())
+                                if negative_input.numel() > 0
+                                else float("inf")
+                            )
+                            self.logger.experiment.log_histogram_3d(
+                                module.AE_input.detach().cpu(),
+                                name=module.__class__.__name__ + ".AE_input",
+                                epoch=self.current_epoch,
+                                start=min(pos_min, neg_min),
+                            )
+                        except Exception as e:
+                            raise e
+
 
     def on_before_optimizer_step(self, optimizer):
         if self.nnmf_layers:

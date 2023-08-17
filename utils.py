@@ -1,3 +1,7 @@
+import random
+import string
+from datetime import datetime
+
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchvision
@@ -247,6 +251,7 @@ def get_model(args):
         from vit import AEViT
 
         net = AEViT(
+            AE_type=args.ae_type,
             seq_len=args.seq_len,
             in_c=args.in_c,
             num_classes=args.num_classes,
@@ -256,7 +261,9 @@ def get_model(args):
             num_layers=args.num_layers,
             hidden=args.hidden,
             ffn_features=args.ffn_features,
-            AE_hidden=args.ae_hidden,
+            AE_hidden_features=args.ae_hidden_features,
+            AE_hidden_seq_len= args.ae_hidden_seq_len,
+            order_2d=args.order_2d,
             depthwise=args.depthwise,
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
@@ -528,8 +535,12 @@ def get_experiment_name(args):
         experiment_name += "_mu"
     if not args.is_cls_token:
         experiment_name += "_gap"
+
+    experiment_name += f"_{random_string(5)}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
     return experiment_name
 
+random_string = lambda n: ''.join([random.choice(string.ascii_lowercase) for i in range(n)]) 
 
 def get_experiment_tags(args):
     tags = [args.model_name]

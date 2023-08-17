@@ -1,3 +1,4 @@
+import os
 import argparse
 from pprint import pprint
 
@@ -17,7 +18,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--model-name",
-    default="vit",
+    default="ae",
     type=str,
     choices=[
         "vit",
@@ -40,7 +41,7 @@ parser.add_argument(
 parser.add_argument("--semi-supervised", action="store_true")
 parser.add_argument("--patch", default=8, type=int)
 parser.add_argument("--batch-size", default=128, type=int)
-parser.add_argument("--eval-batch-size", default=1024, type=int)
+parser.add_argument("--eval-batch-size", default=256, type=int)
 parser.add_argument(
     "--optimizer", default="adam", type=str, choices=["adam", "sgd", "madam"]
 )
@@ -113,9 +114,13 @@ parser.add_argument(
     type=int,
     help="Number of unsupervised steps in a feedforward pass. Only applicable to models  that support unsupervised learning. This is different from semi-supervised learning.",
 )
+parser.add_argument("--ae-type", default="simple", type=str, choices=["simple", "transpose", "heads", "2d"])
 parser.add_argument(
-    "--ae-hidden", default=128, type=int, help="Autoencoder hidden size."
+    "--ae-hidden-features", default=128, type=int, help="Autoencoder hidden size in features dimension."
 )
+parser.add_argument("--ae-hidden-seq-len", default=8, type=int, help="Autoencoder hidden size in sequence dimension.")
+parser.add_argument("--order-2d", type=str, default="sfsf", choices=["sfsf", "sffs"])
+parser.add_argument("--ae-transpose", action="store_true", dest="AE_transpose")
 parser.add_argument("--cnn-normalization", default="layer_norm", type=str)
 parser.add_argument("--factorize", action="store_true")
 parser.add_argument("--no-query", action="store_false", dest="query")
@@ -218,4 +223,15 @@ if __name__ == "__main__":
         enable_model_summary=False,  # Implemented seperately inside the Trainer
     )
     trainer.fit(model=net, train_dataloaders=train_dl, val_dataloaders=test_dl)
-    trainer.save_checkpoint("logs/" + experiment_name + ".ckpt")
+
+    # Save model
+    save_models_dir = "models"
+    save_model_path = os.path.join(save_models_dir, experiment_name + ".ckpt")
+    trainer.save_checkpoint(save_model_path)
+    print(f"Model saved to {save_model_path}")
+    # add model to comet
+    if args._comet_api_key:
+        urls = logger.experiment.log_model(
+            experiment_name, save_model_path, overwrite=True
+        )
+        print(f"Model saved to comet: {urls}")

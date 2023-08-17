@@ -9,14 +9,12 @@ import numpy as np
 import torch
 import cv2
 import math
+import os
 
 st.set_page_config(layout="wide")
 
-max_columns = 5
 batch_size = 10
-heatmap_cmap = cv2.COLORMAP_JET
-resize_interpolation = cv2.INTER_LINEAR
-mask_alpha = 0.5
+
 
 def numpy_to_cv2(image):
     if type(image) == torch.Tensor:
@@ -46,19 +44,27 @@ def to_heatmap(image, size, cmap=cv2.COLORMAP_JET, interpolation=cv2.INTER_NEARE
 
 
 def mask_image(image, mask, interpolation=cv2.INTER_NEAREST, alpha=0.5):
-    image = numpy_to_cv2(image)
-    mask = numpy_to_cv2(mask)
+    if type(image) in [torch.Tensor, np.ndarray]:
+        image = numpy_to_cv2(image)
+    if type(mask) in [torch.Tensor, np.ndarray]:
+        mask = numpy_to_cv2(mask)
 
     # resize mask to image size
     mask = cv2.resize(mask, image.shape[:2][::-1], interpolation=interpolation)
+
+    # mask to BGR
+    mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
 
     return cv2.addWeighted(image, 1 - alpha, mask, alpha, 0)
 
 
 @st.cache_data()
-def load_data(model_name=None, n_layers=None, batch_size=None):
+def load_data(model_name=None, n_layers=None, model_path=None, batch_size=None):
     model, imgs, out = load_run_model(
-        model_name=model_name, n_layers=n_layers, batch_size=batch_size
+        model_name=model_name,
+        n_layers=n_layers,
+        model_path=model_path,
+        batch_size=batch_size,
     )
     attention_maps = get_attention_maps(model)
     return model, imgs, attention_maps
@@ -72,16 +78,30 @@ def main():
     # Sidebar
     st.sidebar.title("Visualizing Attention in Transformers")
     st.sidebar.markdown("select the model:")
+    # model_name = st.sidebar.selectbox(
+    #     "Model:",
+    #     ("vit", "ae"),
+    # )
+    # n_layers = st.sidebar.selectbox(
+    #     "Number of Layers:",
+    #     (1, 3, 7),
+    # )
+    # read all file names in the "models" folder
+    models = os.listdir("models")
+    if not models:
+        st.error("No models found in the 'models' folder.")
+        return
+
     model_name = st.sidebar.selectbox(
-        "Model:",
-        ("vit", "ae"),
+        "Model",
+        models,
     )
-    n_layers = st.sidebar.selectbox(
-        "Number of Layers:",
-        (1, 3, 7),
-    )
+    model_path = f"models/{model_name}"
+
     model, imgs, attention_maps = load_data(
-        batch_size=batch_size, model_name=model_name, n_layers=n_layers
+        batch_size=batch_size,
+        model_path=model_path,
+        # model_name=model_name, n_layers=n_layers
     )
     if attention_maps.dim() == 4:
         # add dimension for heads
@@ -121,28 +141,30 @@ def main():
     if transpose_attention:
         attention_maps = attention_maps.transpose(-1, -2)
 
-
-    heads_transform = st.sidebar.radio(
-        "Heads:", ("Show all heads", "Average over heads", "choose a head")
-    )
-    if heads_transform == "Average over heads":
-        attention_maps = attention_maps.mean(dim=2, keepdim=True)
-        n_heads = 1
-    elif heads_transform == "choose a head":
-        head = st.sidebar.selectbox("Select a head:", range(1, n_heads + 1))
-        attention_maps = attention_maps[:, :, head - 1 : head]
-        n_heads = 1
+    if n_heads > 1:
+        heads_transform = st.sidebar.radio(
+            "Heads:", ("Show all heads", "Average over heads", "choose a head")
+        )
+        if heads_transform == "Average over heads":
+            attention_maps = attention_maps.mean(dim=2, keepdim=True)
+            n_heads = 1
+        elif heads_transform == "choose a head":
+            head = st.sidebar.selectbox("Select a head:", range(1, n_heads + 1))
+            attention_maps = attention_maps[:, :, head - 1 : head]
+            n_heads = 1
 
     with st.sidebar.expander("Advanced Options"):
         cmap = st.selectbox(
             "Color Map:",
             (
+                # Default:
+                "Jet",
+                # Other options:
                 "Autumn",
                 "Bone",
                 "Cool",
                 "Hot",
                 "HSV",
-                "Jet",
                 "Ocean",
                 "Pink",
                 "Rainbow",
@@ -155,8 +177,10 @@ def main():
         interpolation = st.selectbox(
             "Resize Interpolation:",
             (
-                "Nearest",
+                # Default:
                 "Linear",
+                # Other options:
+                "Nearest",
                 "Area",
                 "Cubic",
                 "Lanczos4",
@@ -175,8 +199,8 @@ def main():
             "Mask Intensity:",
             0.0,
             1.0,
-            0.5,
-            0.1,
+            0.4,
+            0.05,
         )
 
     # Main page
@@ -220,13 +244,14 @@ def main():
             if show_image_maps:
                 head_joint_attn_input = col_joint_attentions_input.columns(n_heads)
             for i, head_image in enumerate(head_joint_attn):
+                attention_heatmap = to_heatmap(
+                    joint_attentions[layer, img_index, i],
+                    input_image_size,
+                    heatmap_cmap,
+                    resize_interpolation,
+                )
                 head_image.image(
-                    to_heatmap(
-                        joint_attentions[layer, img_index, i],
-                        input_image_size,
-                        heatmap_cmap,
-                        resize_interpolation,
-                    ),
+                    attention_heatmap,
                     caption=f"{i+1}",
                     use_column_width=True,
                     channels="BGR",
@@ -235,7 +260,7 @@ def main():
                     head_joint_attn_input[i].image(
                         mask_image(
                             input_image_np,
-                            joint_attentions[layer, img_index, i],
+                            attention_heatmap,
                             interpolation=resize_interpolation,
                             alpha=mask_alpha,
                         ),
@@ -252,13 +277,14 @@ def main():
                         max_columns
                     )
                 for head_image_idx in range(max_columns):
+                    heatmap = to_heatmap(
+                        joint_attentions[layer, img_index, head_idx],
+                        input_image_size,
+                        heatmap_cmap,
+                        resize_interpolation,
+                    )
                     head_joint_attn[head_image_idx].image(
-                        to_heatmap(
-                            joint_attentions[layer, img_index, head_idx],
-                            input_image_size,
-                            heatmap_cmap,
-                            resize_interpolation,
-                        ),
+                        heatmap,
                         caption=f"{head_idx+1}",
                         use_column_width=True,
                         channels="BGR",
@@ -267,7 +293,7 @@ def main():
                         head_joint_attn_input[head_image_idx].image(
                             mask_image(
                                 input_image_np,
-                                joint_attentions[layer, img_index, head_idx],
+                                heatmap,
                                 interpolation=resize_interpolation,
                                 alpha=mask_alpha,
                             ),
@@ -298,13 +324,14 @@ def main():
             if show_image_maps:
                 head_attn_input = col_attention_maps_input.columns(n_heads)
             for i, head_image in enumerate(head_attn):
+                heatmap = to_heatmap(
+                    attention_maps[layer, img_index, i],
+                    input_image_size,
+                    heatmap_cmap,
+                    resize_interpolation,
+                )
                 head_image.image(
-                    to_heatmap(
-                        attention_maps[layer, img_index, i],
-                        input_image_size,
-                        heatmap_cmap,
-                        resize_interpolation,
-                    ),
+                    heatmap,
                     caption=f"{i+1}",
                     use_column_width=True,
                     channels="BGR",
@@ -313,7 +340,7 @@ def main():
                     head_attn_input[i].image(
                         mask_image(
                             input_image_np,
-                            attention_maps[layer, img_index, i],
+                            heatmap,
                             interpolation=resize_interpolation,
                             alpha=mask_alpha,
                         ),
@@ -328,13 +355,14 @@ def main():
                 if show_image_maps:
                     head_attn_input = col_attention_maps_input.columns(max_columns)
                 for head_image_idx in range(max_columns):
+                    heatmap = to_heatmap(
+                        attention_maps[layer, img_index, head_idx],
+                        input_image_size,
+                        heatmap_cmap,
+                        resize_interpolation,
+                    )
                     head_attn[head_image_idx].image(
-                        to_heatmap(
-                            attention_maps[layer, img_index, head_idx],
-                            input_image_size,
-                            heatmap_cmap,
-                            resize_interpolation,
-                        ),
+                        heatmap,
                         caption=f"{head_idx+1}",
                         use_column_width=True,
                         channels="BGR",
@@ -343,7 +371,7 @@ def main():
                         head_attn_input[head_image_idx].image(
                             mask_image(
                                 input_image_np,
-                                attention_maps[layer, img_index, head_idx],
+                                heatmap,
                                 interpolation=resize_interpolation,
                                 alpha=mask_alpha,
                             ),

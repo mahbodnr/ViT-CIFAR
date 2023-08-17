@@ -10,6 +10,7 @@ def load_run_model(model_name=None, n_layers=None, model_path=None, batch_size= 
 
     print("Loading model")
     trained_model = torch.load(model_path)
+    print('*' * 100, type(trained_model))
     hparams = trained_model["hyper_parameters"]
     args = Namespace(**hparams)
     args._comet_api_key = None
