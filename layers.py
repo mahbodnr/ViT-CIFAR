@@ -841,6 +841,7 @@ class AEAttention(nn.Module):
         features,
         ffn_features,
         AE_hidden,
+        chunk,
         save_attn_map=False,
     ):
         super().__init__()
@@ -849,16 +850,17 @@ class AEAttention(nn.Module):
         self.ffn_features = ffn_features
         self.U = nn.Linear(features, ffn_features)
         self.AE = autoencoder
-        self.V = nn.Linear(ffn_features, features)
+        self.V = nn.Linear((ffn_features // 2 if chunk else ffn_features), features)
         self.activation = nn.GELU()
-        self.norm1 = nn.LayerNorm([ffn_features])
-        self.norm2 = nn.LayerNorm([ffn_features])
+        self.norm1 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features])
+        self.norm2 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features]) # DELETE ME
         # save the input and output of the autoencoder in each forward pass
         self.AE_input = None
         self.AE_hidden = None
         self.AE_output = None
         # save attention map
         self.save_attn_map = save_attn_map
+        self.chunk = chunk
 
         self.AE_optimizer = torch.optim.Adam(self.AE.parameters(), lr=0.001)
 
@@ -866,8 +868,13 @@ class AEAttention(nn.Module):
         # x dimension: [batch, seq_len, features]
         x = self.activation(self.U(x))
         # detach z2 from the graph
-        z = x.detach()
-        z = self.norm1(z)
+        if self.chunk:
+            x, z = x.chunk(2, dim=-1)
+            z = z.detach()
+            z = self.norm1(z)
+        else:
+            z = x.detach()
+            z = self.norm1(z)
         # Do a forward pass for the autoencoder with full unmasked data and save the input and output
         self.AE_input = z.clone()  # [batch, seq_len, ffn_features]
         self.AE_output = self.AE(z)
@@ -893,7 +900,7 @@ class AEAttention(nn.Module):
             self.attn_map = attn_map.clone()
         attn = torch.einsum(
             "bij, bjf->bif", attn_map, x
-        )  # [batch, seq_len, ffn_features // 2]
+        )  # [batch, seq_len, ffn_features OR ffn_features // 2]
         x = self.V(attn)  # [batch, seq_len, features]
         return x
 
@@ -916,19 +923,27 @@ class AEAttention(nn.Module):
 
 class AEAttentionHeads(nn.Module):
     def __init__(
-        self, heads, seq_len, features, ffn_features, AE_hidden, save_attn_map=False
+        self,
+        heads,
+        seq_len,
+        features,
+        ffn_features,
+        AE_hidden,
+        chunk,
+        save_attn_map=False,
     ):
         super().__init__()
         # assert ffn_features % 2 == 0
         self.features = features
         self.ffn_features = ffn_features
         self.heads = heads
+        self.chunk = chunk
         self.U = nn.Linear(features, ffn_features)
         self.AE = AutoencoderT(seq_len * heads, AE_hidden)
-        self.V = nn.Linear(ffn_features, features)
+        self.V = nn.Linear((ffn_features // 2 if chunk else ffn_features), features)
         self.activation = nn.GELU()
-        self.norm1 = nn.LayerNorm([ffn_features])
-        self.norm2 = nn.LayerNorm([ffn_features])
+        self.norm1 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features])
+        self.norm2 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features]) # DELETE ME
         # save the input and output of the autoencoder in each forward pass
         self.AE_input = None
         self.AE_hidden = None
@@ -941,38 +956,43 @@ class AEAttentionHeads(nn.Module):
     def forward(self, x):
         # x dimension: [batch, seq_len, features]
         x = self.activation(self.U(x))  # [batch, seq_len, ffn_features]
-        x = self.norm1(x)
+        if self.chunk:
+            x, z = x.chunk(2, dim=-1)
+            z = z.detach() # [batch, seq_len, ffn_features // 2]
+            z = self.norm1(z)
+        else:
+            x = self.norm1(x)
+            z = x.detach()  # [batch, seq_len, ffn_features]
         x_heads = self._devide_to_heads(
             x
-        )  # [batch, heads, seq_len, ffn_features // heads]
+        )  # [batch, heads, seq_len, ffn_features(//2) // heads]
         # detach z2 from the graph
-        z = x.detach()  # [batch, seq_len, ffn_features]
-        z_heads = x_heads.detach()  # [batch, heads, seq_len, ffn_features // heads]
+        z_heads = x_heads.detach()  # [batch, heads, seq_len, ffn_features(//2) // heads]
         # Do a forward pass for the autoencoder with full unmasked data and save the input and output
         self.AE_input = z_heads.reshape(
             z_heads.shape[0], z_heads.shape[1] * z_heads.shape[2], z_heads.shape[3]
-        )  # [batch, seq_len * heads, ffn_features // heads]
+        )  # [batch, seq_len * heads, ffn_features(//2) // heads]
         self.AE_output = self.AE(self.AE_input)
         self.AE_hidden = self.AE.hidden_activity.clone()
         # repeat z2, 'seq_len' times along dim=1
         z_mask = z.unsqueeze(1).repeat(
             1, z.shape[1], 1, 1
-        )  # [batch, seq_len, seq_len, ffn_features]
+        )  # [batch, seq_len, seq_len, ffn_features(//2)]
         # for each value in dim=1, keep one value in dim=2 and set the rest to 0
         z_mask = torch.eye(z.shape[1]).unsqueeze(-1).to(z.device) * z_mask
         # pass the result through AE
         z_mask_heads = self._devide_to_heads(
             z_mask
-        )  # [batch, seq_len, heads, seq_len, ffn_features // heads]
+        )  # [batch, seq_len, heads, seq_len, ffn_features(//2) // heads]
         z_mask_heads_AE_input = z_mask_heads.reshape(
             z_mask_heads.shape[0],
             z_mask_heads.shape[1],
             z_mask_heads.shape[2] * z_mask_heads.shape[3],
             z_mask_heads.shape[4],
-        )  # [batch, seq_len, heads * seq_len , ffn_features // heads]
+        )  # [batch, seq_len, heads * seq_len , ffn_features(//2) // heads]
         AE_preds = self.AE(z_mask_heads_AE_input).reshape_as(
             z_mask_heads
-        ) # [batch, seq_len, heads, seq_len, ffn_features // heads]
+        )  # [batch, seq_len, heads, seq_len, ffn_features(//2) // heads]
         # calculate distance between the original z2 and the AE predictions
         # elementwise multiplication
         dist = (AE_preds * z_heads.unsqueeze(1)).sum(
@@ -988,8 +1008,8 @@ class AEAttentionHeads(nn.Module):
             self.attn_map = attn_map.clone()
         attn = torch.einsum(
             "bhij, bhjf->bihf", attn_map, x_heads
-        )  # [batch, heads, seq_len, ffn_features // heads]
-        attn = attn.flatten(2)  # [batch, seq_len, ffn_features]
+        )  # [batch, heads, seq_len, ffn_features(//2) // heads]
+        attn = attn.flatten(2)  # [batch, seq_len, ffn_features(//2)]
         x = self.V(attn)  # [batch, seq_len, features]
         return x
 
@@ -1029,8 +1049,10 @@ class AEAttentionTransformerEncoder(TransformerEncoder):
         AE_hidden_features: int,
         AE_hidden_seq_len: int,
         mlp_hidden: int,
+        chunk: bool = False,
         order_2d: str = "sfsf",
         heads: int = 1,
+        legacy_heads: bool = False,
         dropout: float = 0.0,
         use_mlp: bool = True,
         save_attn_map: bool = False,
@@ -1046,6 +1068,7 @@ class AEAttentionTransformerEncoder(TransformerEncoder):
                 features,
                 ffn_features,
                 AE_hidden_features,
+                chunk,
                 save_attn_map,
             )
         elif AE_type == "transpose":
@@ -1056,18 +1079,31 @@ class AEAttentionTransformerEncoder(TransformerEncoder):
                 features,
                 ffn_features,
                 AE_hidden_features,
+                chunk,
                 save_attn_map,
             )
         elif AE_type == "heads":
-            # autoencoder = AutoencoderH(seq_len * heads, AE_hidden_features, heads)
-            self.attention = AEAttentionHeads(
-                heads,
-                seq_len,
-                features,
-                ffn_features,
-                AE_hidden_seq_len,
-                save_attn_map,
-            )
+            if legacy_heads:
+                autoencoder = AutoencoderH(seq_len * heads, AE_hidden_features, heads)
+                self.attention = AEAttention(
+                    autoencoder,
+                    seq_len,
+                    features,
+                    ffn_features,
+                    AE_hidden_features,
+                    chunk,
+                    save_attn_map,
+                )
+            else:
+                self.attention = AEAttentionHeads(
+                    heads,
+                    seq_len,
+                    features,
+                    ffn_features,
+                    AE_hidden_seq_len,
+                    chunk,
+                    save_attn_map,
+                )
         elif AE_type == "2d":
             autoencoder = Autoencoder2D(
                 order_2d, seq_len, ffn_features, AE_hidden_seq_len, AE_hidden_features
@@ -1078,6 +1114,7 @@ class AEAttentionTransformerEncoder(TransformerEncoder):
                 features,
                 ffn_features,
                 AE_hidden_features,
+                chunk,
                 save_attn_map,
             )
         else:

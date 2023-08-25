@@ -114,6 +114,8 @@ parser.add_argument(
     type=int,
     help="Number of unsupervised steps in a feedforward pass. Only applicable to models  that support unsupervised learning. This is different from semi-supervised learning.",
 )
+parser.add_argument("--chunk", action="store_true", help="Whether to chunk the input of the AE Attention models.")
+parser.add_argument("--legacy-heads", action="store_true", help="Use legacy heads code in AEViT.")
 parser.add_argument("--ae-type", default="simple", type=str, choices=["simple", "transpose", "heads", "2d"])
 parser.add_argument(
     "--ae-hidden-features", default=128, type=int, help="Autoencoder hidden size in features dimension."

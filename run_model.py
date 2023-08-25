@@ -14,11 +14,8 @@ def load_run_model(model_name=None, n_layers=None, model_path=None, batch_size= 
     hparams = trained_model["hyper_parameters"]
     args = Namespace(**hparams)
     args._comet_api_key = None
-    args.semi_supervised = False #DELETE later
-    args.download_data = False #DELETE later
-    args.shuffle = False #DELETE later
-    args.pin_memory = False #DELETE later
-    args.unsupervised_steps = 0 #DELETE later
+    args.chunk= args.chunk_size if hasattr(args, "chunk_size") else False
+    args.legacy_heads = args.heads if hasattr(args, "heads") else False
     if batch_size is not None:
         args.eval_batch_size = batch_size
     model = Net(args)

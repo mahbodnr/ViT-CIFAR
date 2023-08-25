@@ -263,6 +263,8 @@ def get_model(args):
             ffn_features=args.ffn_features,
             AE_hidden_features=args.ae_hidden_features,
             AE_hidden_seq_len= args.ae_hidden_seq_len,
+            chunk= args.chunk,
+            legacy_heads = args.legacy_heads,
             order_2d=args.order_2d,
             depthwise=args.depthwise,
             encoder_mlp=args.use_encoder_mlp,

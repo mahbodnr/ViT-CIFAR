@@ -5,9 +5,10 @@
 .DS_Store
 
 todo.md
-nightly/*
-data/*
-weights/*
+nightly
+data
+models
+weights
 logs/*
 AutoAugment
 wandb
