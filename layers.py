@@ -853,7 +853,6 @@ class AEAttention(nn.Module):
         self.V = nn.Linear((ffn_features // 2 if chunk else ffn_features), features)
         self.activation = nn.GELU()
         self.norm1 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features])
-        self.norm2 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features]) # DELETE ME
         # save the input and output of the autoencoder in each forward pass
         self.AE_input = None
         self.AE_hidden = None
@@ -943,7 +942,6 @@ class AEAttentionHeads(nn.Module):
         self.V = nn.Linear((ffn_features // 2 if chunk else ffn_features), features)
         self.activation = nn.GELU()
         self.norm1 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features])
-        self.norm2 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features]) # DELETE ME
         # save the input and output of the autoencoder in each forward pass
         self.AE_input = None
         self.AE_hidden = None
@@ -967,7 +965,9 @@ class AEAttentionHeads(nn.Module):
             x
         )  # [batch, heads, seq_len, ffn_features(//2) // heads]
         # detach z2 from the graph
-        z_heads = x_heads.detach()  # [batch, heads, seq_len, ffn_features(//2) // heads]
+        z_heads = self._devide_to_heads(
+            z
+        ) # [batch, heads, seq_len, ffn_features(//2) // heads]
         # Do a forward pass for the autoencoder with full unmasked data and save the input and output
         self.AE_input = z_heads.reshape(
             z_heads.shape[0], z_heads.shape[1] * z_heads.shape[2], z_heads.shape[3]
@@ -1061,7 +1061,11 @@ class AEAttentionTransformerEncoder(TransformerEncoder):
             features, mlp_hidden, heads, dropout, use_mlp, save_attn_map
         )
         if AE_type == "simple":
-            autoencoder = Autoencoder(ffn_features, AE_hidden_features)
+            if chunk:
+                AE_input_size = ffn_features // 2
+            else:
+                AE_input_size = ffn_features
+            autoencoder = Autoencoder(AE_input_size, AE_hidden_features)
             self.attention = AEAttention(
                 autoencoder,
                 seq_len,
@@ -1105,8 +1109,12 @@ class AEAttentionTransformerEncoder(TransformerEncoder):
                     save_attn_map,
                 )
         elif AE_type == "2d":
+            if chunk:
+                AE_input_size = ffn_features // 2
+            else:
+                AE_input_size = ffn_features
             autoencoder = Autoencoder2D(
-                order_2d, seq_len, ffn_features, AE_hidden_seq_len, AE_hidden_features
+                order_2d, seq_len, AE_input_size, AE_hidden_seq_len, AE_hidden_features
             )
             self.attention = AEAttention(
                 autoencoder,

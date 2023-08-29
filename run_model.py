@@ -14,11 +14,24 @@ def load_run_model(model_name=None, n_layers=None, model_path=None, batch_size= 
     hparams = trained_model["hyper_parameters"]
     args = Namespace(**hparams)
     args._comet_api_key = None
-    args.chunk= args.chunk_size if hasattr(args, "chunk_size") else False
+    args.chunk= args.chunk if hasattr(args, "chunk") else False
     args.legacy_heads = args.heads if hasattr(args, "heads") else False
     if batch_size is not None:
         args.eval_batch_size = batch_size
     model = Net(args)
+
+    # DELETE LATER:
+    # Removing norm2 from the model
+    for name, module in model.named_modules():
+        if "norm2" in name:
+            # remove norm2 from the model
+            delattr(model, name)
+    # removing norm2 from the state dict
+    for key in list(trained_model["state_dict"].keys()):
+        if "norm2" in key:
+            del trained_model["state_dict"][key]
+    # END DELETE LATER
+
     model.load_state_dict(trained_model["state_dict"])
     model.eval()
     # get a batch of data

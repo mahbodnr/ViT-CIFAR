@@ -3,6 +3,21 @@ from torch import nn
 from torch.nn import functional as F
 
 from nnmf.AutoNNMFLayer import AutoNNMFLayer
+from nnmf.NNMFLinear import NNMFLinear
+
+def linear(input_size, hidden_size, nnmf, nnmf_params={},dropout=0.0):
+    if nnmf:
+        return NNMFLinear(
+            number_of_input_neurons= input_size,
+            number_of_neurons= hidden_size,
+            **nnmf_params,
+        )
+    else:
+        return nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
 
 
 class Autoencoder(nn.Module):
