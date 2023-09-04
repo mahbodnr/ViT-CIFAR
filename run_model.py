@@ -10,12 +10,18 @@ def load_run_model(model_name=None, n_layers=None, model_path=None, batch_size= 
 
     print("Loading model")
     trained_model = torch.load(model_path)
-    print('*' * 100, type(trained_model))
     hparams = trained_model["hyper_parameters"]
     args = Namespace(**hparams)
     args._comet_api_key = None
+    # Delete later
     args.chunk= args.chunk if hasattr(args, "chunk") else False
     args.legacy_heads = args.heads if hasattr(args, "heads") else False
+    args.use_nnmf_layers = args.use_nnmf_layers if hasattr(args, "use_nnmf_layers") else False
+    args._nnmf_params = {}
+    args.nnmf_local_learning = args.nnmf_local_learning if hasattr(args, "nnmf_local_learning") else False
+    args.nnmf_scale_grade = args.nnmf_scale_grade if hasattr(args, "nnmf_scale_grade") else False
+    args.mask_type = args.mask_type if hasattr(args, "mask_type") else "zeros"
+    # END DELETE LATER
     if batch_size is not None:
         args.eval_batch_size = batch_size
     model = Net(args)
@@ -26,13 +32,9 @@ def load_run_model(model_name=None, n_layers=None, model_path=None, batch_size= 
         if "norm2" in name:
             # remove norm2 from the model
             delattr(model, name)
-    # removing norm2 from the state dict
-    for key in list(trained_model["state_dict"].keys()):
-        if "norm2" in key:
-            del trained_model["state_dict"][key]
     # END DELETE LATER
 
-    model.load_state_dict(trained_model["state_dict"])
+    model.load_state_dict(trained_model["state_dict"], strict=False)
     model.eval()
     # get a batch of data
     print("Loading data")

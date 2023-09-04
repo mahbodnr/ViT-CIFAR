@@ -15,7 +15,22 @@ class Net(pl.LightningModule):
     def __init__(self, hparams):
         super(Net, self).__init__()
         self.hparams.update(vars(hparams))
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=[key for key in self.hparams.keys() if key[0] == "_"])
+        hparams._nnmf_params = {
+                "number_of_iterations": hparams.md_iter,
+                # epsilon_0: float = 1.0,
+                # weight_noise_range: list[float] = [0.0, 1.0],
+                "w_trainable": hparams.train_md_bases,
+                # "device": self.device,
+                "device": torch.device("cuda"),
+                "default_dtype": torch.float32,
+                # layer_id: int = -1,
+                "local_learning": hparams.nnmf_local_learning,
+                # output_layer: bool = False,
+                # skip_gradient_calculation: bool = False,
+                "keep_last_grad_scale": hparams.nnmf_scale_grade,
+                "disable_scale_grade": not hparams.nnmf_scale_grade,
+        }
         self.model, self.model_can_learn_unsupervised = get_model(hparams)
         if (
             not self.model_can_learn_unsupervised
@@ -72,7 +87,7 @@ class Net(pl.LightningModule):
             nnmf_params = []
             other_params = []
             for name, param in self.model.named_parameters():
-                if "nnmf" in name.lower():
+                if "nnmf" in name.lower() or "_weights" in name.lower():
                     nnmf_params.append(param)
                 else:
                     other_params.append(param)
@@ -153,7 +168,7 @@ class Net(pl.LightningModule):
             out = self(img)
             loss = self.calculate_loss(out, label)
 
-        if self.model_can_learn_unsupervised:
+        if self.model_can_learn_unsupervised and self.hparams.unsupervised_steps > 0:
             unsupervised_loss = 0
             for _ in range(self.hparams.unsupervised_steps):
                 unsupervised_loss += self.model.unsupervised_update()

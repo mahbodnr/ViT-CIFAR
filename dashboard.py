@@ -92,11 +92,20 @@ def main():
         st.error("No models found in the 'models' folder.")
         return
 
-    model_name = st.sidebar.selectbox(
+    model_name, model_name_refresh = st.sidebar.columns([5, 1])
+    selected_model = model_name.selectbox(
         "Model",
         models,
+        label_visibility= "collapsed"
     )
-    model_path = f"models/{model_name}"
+    model_path = f"models/{selected_model}"
+
+    model_name_refresh.button("🔄")
+    if model_name_refresh:
+        models = os.listdir("models")
+        if not models:
+            st.error("No models found in the 'models' folder.")
+            return
 
     model, imgs, attention_maps = load_data(
         batch_size=batch_size,

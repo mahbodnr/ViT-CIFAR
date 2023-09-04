@@ -270,6 +270,9 @@ def get_model(args):
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,
+            mask_type=args.mask_type,
+            nnmf=args.use_nnmf_layers,
+            nnmf_params=args._nnmf_params,
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
         )

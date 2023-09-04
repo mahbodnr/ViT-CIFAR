@@ -425,6 +425,9 @@ class AEViT(ViT):
         encoder_mlp: bool = True,
         mlp_hidden: int = 768 * 4,
         head: int = 1,
+        mask_type: str = "zeros",
+        nnmf: bool = False,
+        nnmf_params: dict = {},
         is_cls_token: bool = True,
         pos_emb: bool = True,
     ):
@@ -451,11 +454,14 @@ class AEViT(ViT):
                     AE_hidden_seq_len=AE_hidden_seq_len,
                     ffn_features=ffn_features,
                     chunk=chunk,
+                    mask_type=mask_type,
                     legacy_heads=legacy_heads,
                     order_2d=order_2d,
                     heads=head,
                     use_mlp=encoder_mlp,
                     mlp_hidden=mlp_hidden,
+                    nnmf= nnmf,
+                    nnmf_params= nnmf_params,
                     dropout=dropout,
                 )
                 for _ in range(num_layers)
