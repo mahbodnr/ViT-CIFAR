@@ -48,7 +48,15 @@ def load_run_model(model_name=None, n_layers=None, model_path=None, batch_size= 
     # one forward pass
     print("Forward pass")
     with torch.no_grad():
-        out = model(imgs)
+        if torch.cuda.is_available():    
+            model = model.cuda()
+            imgs = imgs.cuda()
+            out = model(imgs)
+            model = model.cpu()
+            imgs = imgs.cpu()
+            out = out.cpu()
+        else:
+            out = model(imgs)
 
     print("Loading complete")
     return model, imgs, out

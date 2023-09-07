@@ -83,8 +83,9 @@ def get_joint_attentions(attn_mat, token = None):
     """
     # check if the input is a torch tensor
     if not isinstance(attn_mat, torch.Tensor):
-        attn_mat = torch.stack(attn_mat).cpu()
+        attn_mat = torch.stack(attn_mat)
 
+    attn_mat = attn_mat.cpu()
     # To account for residual connections, we add an identity matrix to the
     # attention matrix and re-normalize the weights.
     residual_att = torch.eye(attn_mat.size(-1))

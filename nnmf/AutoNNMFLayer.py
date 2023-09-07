@@ -233,7 +233,7 @@ class AutoNNMFLayer(torch.nn.Module):
         # Are we happy with the input?
         assert input is not None
         assert torch.is_tensor(input) is True
-        assert input.dim() == 4
+        assert input.dim() == 4, "input must be 4D. Got: " + str(input.shape)
         assert input.dtype == self.default_dtype
         assert input.shape[1] == self._number_of_input_neurons
         assert input.shape[2] == self._input_size[0]
@@ -301,6 +301,8 @@ class AutoNNMFLayer(torch.nn.Module):
             self._last_grad_scale,
         )
 
+        self.hidden_activity = h.detach().clone()
+
         self._number_of_grad_weight_contributions += (
             h.shape[0] * h.shape[-2] * h.shape[-1]
         )
@@ -358,13 +360,15 @@ class FunctionalAutoNNMF(torch.autograd.Function):
 
         for _ in range(0, number_of_iterations):
             h_w = h.unsqueeze(1) * weights.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
-            h_w = h_w / (h_w.sum(dim=2, keepdim=True) + 1e-20)
+            h_w = h_w / (h_w.sum(dim=2, keepdim=True) + 1e-5)
             h_w = (h_w * input.unsqueeze(2)).sum(dim=1)
             if _epsilon_0 > 0:
                 h = h + _epsilon_0 * h_w
             else:
                 h = h_w
-            h = h / (h.sum(dim=1, keepdim=True) + 1e-20)
+            h = h / (h.sum(dim=1, keepdim=True) + 1e-5)
+            
+            assert not torch.isnan(h).any(), "h is nan"
 
         ctx.save_for_backward(
             input,
@@ -381,6 +385,7 @@ class FunctionalAutoNNMF(torch.autograd.Function):
         # ##############################################
         # Get the variables back
         # ##############################################
+        assert not torch.isnan(grad_output).any()
         (
             input,
             weights,
@@ -418,7 +423,6 @@ class FunctionalAutoNNMF(torch.autograd.Function):
                 ).max()
             grad_output /= last_grad_scale
         grad_output_scale = last_grad_scale.clone()
-
         input /= input.sum(dim=1, keepdim=True, dtype=weights.dtype) + 1e-20
 
         # #################################################

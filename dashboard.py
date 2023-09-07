@@ -18,7 +18,7 @@ batch_size = 10
 
 def numpy_to_cv2(image):
     if type(image) == torch.Tensor:
-        image = image.numpy()
+        image = image.cpu().numpy()
     image = image - image.min()
     image = image / image.max()
     image = (image * 255).astype(np.uint8)

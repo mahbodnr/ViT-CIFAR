@@ -49,8 +49,9 @@ class Net(pl.LightningModule):
         self.nnmf_layers = []
         # add all nnmf modules to nnmf_layers
         for name, module in self.model.named_modules():
-            if "nnmf" in name.lower():
+            if "nnmf" in name.lower() or hasattr(module, "_weights"):
                 self.nnmf_layers.append(module)
+        print(f"Number of NNMF layers (modules): {len(self.nnmf_layers)}")
 
     def forward(self, x):
         return self.model(x)
@@ -92,7 +93,7 @@ class Net(pl.LightningModule):
                 else:
                     other_params.append(param)
             print(
-                f"NNMF parameters: {len(nnmf_params)}\nOther parameters: {len(other_params)}"
+                f"Optimizer params:\nNNMF parameters: {len(nnmf_params)}\nOther parameters: {len(other_params)}"
             )
             self.optimizer = Madam(
                 params=[
@@ -227,7 +228,7 @@ class Net(pl.LightningModule):
                 raise ValueError(f"[ERROR] {name} has nan value. Training stopped.")
         # log weights and layer outputs
         if self.hparams.log_weights:
-            if not self.hparams.dry_run:
+            if not self.hparams.dry_run and hasattr(self.logger.experiment, "log_histogram_3d"):
                 # log the output of each layer
                 layer_outputs = get_layer_outputs(
                     self.model, self.hparams._sample_input_data
@@ -325,11 +326,10 @@ class Net(pl.LightningModule):
     def on_before_optimizer_step(self, optimizer):
         if self.nnmf_layers:
             for layer in self.nnmf_layers:
-                if self.trainer.global_step == 0:
-                    layer.after_batch(True)
-                else:
-                    layer.after_batch(False)
-
+                # if self.trainer.global_step == 0:
+                #     layer.after_batch(True)
+                # else:
+                #     layer.after_batch(False)
                 layer.update_pre_care()
 
         # log gradients once per epoch
@@ -377,10 +377,10 @@ class Net(pl.LightningModule):
                 #     f"Max {name}.grad", param.grad.detach().cpu().max().item()
                 # )
 
-    def on_after_optimizer_step(self):
+    def on_train_batch_end(self, out, batch, batch_idx):
         if self.nnmf_layers:
             for layer in self.nnmf_layers:
-                layer.update_post_care(
+                layer.update_after_care(
                     self.hparams.nnmf_learning_rate_threshold_w
                     / layer._number_of_input_neurons
                 )

@@ -8,6 +8,8 @@ import argparse
 from typing import Optional, Tuple, List
 
 from autoencoders import Autoencoder, AutoencoderT, AutoencoderH, Autoencoder2D
+from nnmf.AutoNNMFLayer import AutoNNMFLayer
+from nnmf.optimizer import Madam
 
 
 class TransformerEncoder(nn.Module):
@@ -923,13 +925,32 @@ class AEAttentionHeads(nn.Module):
         # assert ffn_features % 2 == 0
         self.features = features
         self.ffn_features = ffn_features
+        hidden_features = ffn_features // 2 if chunk else ffn_features
         self.heads = heads
         self.chunk = chunk
         self.U = nn.Linear(features, ffn_features)
-        self.AE = AutoencoderT(seq_len * heads, AE_hidden, nnmf, nnmf_params)
-        self.V = nn.Linear((ffn_features // 2 if chunk else ffn_features), features)
+        self.nnmf = nnmf
+        if nnmf:
+            self.AE = AutoNNMFLayer(
+                number_of_input_neurons=1,
+                number_of_neurons=AE_hidden,
+                input_size=(seq_len * heads, hidden_features // heads),
+                forward_kernel_size=[seq_len * heads, 1],
+                number_of_iterations=nnmf_params["number_of_iterations"],
+                local_learning= nnmf_params["local_learning"],
+                w_trainable=True,
+                device=torch.device("cuda"),
+                default_dtype=torch.float32,
+                dilation=[1, 1],
+                keep_last_grad_scale=True, 
+                disable_scale_grade=False,
+            )
+        else:
+            self.AE = AutoencoderT(seq_len * heads, AE_hidden, nnmf, nnmf_params)
+
+        self.V = nn.Linear(hidden_features, features)
         self.activation = nn.GELU()
-        self.norm1 = nn.LayerNorm([ffn_features // 2 if chunk else ffn_features])
+        self.norm1 = nn.LayerNorm([hidden_features])
         # save the input and output of the autoencoder in each forward pass
         self.AE_input = None
         self.AE_hidden = None
@@ -939,7 +960,19 @@ class AEAttentionHeads(nn.Module):
         self.mask_type = mask_type
         self.save_attn_map = save_attn_map
 
-        self.AE_optimizer = torch.optim.Adam(self.AE.parameters(), lr=0.001)
+        if nnmf:
+            self.AE_optimizer = Madam(
+                params=[
+                    {
+                        "params": self.AE.parameters(),
+                        "lr": 0.001,
+                        "nnmf": True,
+                        "foreach": False,
+                    },
+                ],
+            )
+        else:
+            self.AE_optimizer = torch.optim.Adam(self.AE.parameters(), lr=0.001)
 
     def forward(self, x):
         # x dimension: [batch, seq_len, features]
@@ -962,6 +995,8 @@ class AEAttentionHeads(nn.Module):
         self.AE_input = z_heads.reshape(
             z_heads.shape[0], z_heads.shape[1] * z_heads.shape[2], z_heads.shape[3]
         )  # [batch, seq_len * heads, ffn_features(//2) // heads]
+        if self.nnmf:
+            self.AE_input = self.AE_input.unsqueeze(1)
         self.AE_output = self.AE(self.AE_input)
         self.AE_hidden = self.AE.hidden_activity.clone()
         # repeat z2, 'seq_len' times along dim=1
@@ -987,9 +1022,15 @@ class AEAttentionHeads(nn.Module):
             z_mask_heads.shape[2] * z_mask_heads.shape[3],
             z_mask_heads.shape[4],
         )  # [batch, seq_len, heads * seq_len , ffn_features(//2) // heads]
-        AE_preds = self.AE(z_mask_heads_AE_input).reshape_as(
-            z_mask_heads
-        )  # [batch, seq_len, heads, seq_len, ffn_features(//2) // heads]
+        if self.nnmf:
+            W = self.AE.weights  # [seq_len * heads, AE_hidden]
+            AE_preds = ((W @ W.T) @ z_mask_heads_AE_input).reshape_as(
+                z_mask_heads
+            )  # [batch, seq_len, heads, seq_len, ffn_features(//2) // heads]
+        else:
+            AE_preds = self.AE(z_mask_heads_AE_input).reshape_as(
+                z_mask_heads
+            )  # [batch, seq_len, heads, seq_len, ffn_features(//2) // heads]
         # calculate distance between the original z2 and the AE predictions
         # elementwise multiplication
         dist = (AE_preds * z_heads.unsqueeze(1)).sum(
@@ -1026,13 +1067,22 @@ class AEAttentionHeads(nn.Module):
         AE_preds = self.AE(AE_input)
         # calculate the loss
         loss = F.mse_loss(AE_preds, AE_input)
+        # check if loss is not inf or nan
+        if torch.isnan(loss) or torch.isinf(loss):
+            return 0
         # zero the gradients
         self.AE_optimizer.zero_grad()
         # calculate the gradients
         loss.backward()
         # update the weights
+        if self.nnmf:
+            self.AE.update_pre_care()
         self.AE_optimizer.step()
-
+        if self.nnmf:
+            self.AE.update_after_care(
+                    1e-3 # nnmf_learning_rate_threshold_w
+                    / self.AE._number_of_input_neurons
+                )
         return loss.item()
 
 
